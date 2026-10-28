@@ -81,12 +81,6 @@ namespace Zubi.js.Bridge
                 return;
             }
 
-            if (path == "/health")
-            {
-                await WriteTextAsync(ctx, 200, "ok");
-                return;
-            }
-
             var rel = path.TrimStart('/');
 
             if (string.IsNullOrWhiteSpace(rel))
@@ -95,13 +89,6 @@ namespace Zubi.js.Bridge
             var full = Path.GetFullPath(Path.Combine(_rootPath, rel));
             var isIndex = rel.Equals(Utils.INDEX_HTML, StringComparison.OrdinalIgnoreCase);
             var exists = File.Exists(full);
-
-            // Seguridad: evita que se acceda fuera de la carpeta "src"
-            //if (!full.StartsWith(_rootPath, StringComparison.Ordinal))
-            //{
-            //    await WriteTextAsync(ctx, 403, "Forbidden");
-            //    return;
-            //}
 
             if (!isIndex && !exists)
             {
@@ -120,21 +107,14 @@ namespace Zubi.js.Bridge
                 if (req.HttpMethod == "GET")
                 {
                     var tabToken = _session.ConsumeMasterToken(req.QueryString["token"]);
-                    if (tabToken is not null)
-                    {
-                        //var head = "<head>";
-                        var meta = $"<meta name=\"bridge-token\" content=\"{tabToken}\">";
-                        var script = "<script>";
-                        script += Environment.NewLine;
-                        script += ScriptResources.MainScript;
-                        script += Environment.NewLine;
-                        script += "</script>";
-
-                        var result = Environment.NewLine + meta + Environment.NewLine + script + Environment.NewLine;
-
-                        //html = Utils.ReplaceFirst(html, head, head + result);
-                        html = result + Environment.NewLine + html;
-                    }
+                    var meta = tabToken is not null ? $"<meta name=\"bridge-token\" content=\"{tabToken}\">" : string.Empty;
+                    var script = "<script>";
+                    script += Environment.NewLine;
+                    script += ScriptResources.MainScript;
+                    script += Environment.NewLine;
+                    script += "</script>";
+                    var result = Environment.NewLine + meta + Environment.NewLine + script + Environment.NewLine;
+                    html = result + html;
                 }
 
                 await WriteBytesAsync(ctx, 200, Encoding.UTF8.GetBytes(html), contentType, true);
