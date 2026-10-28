@@ -1,4 +1,5 @@
 ﻿using Zubi.js.Bridge;
+using Zubi.js.Helpers;
 using Zubi.js.PluginManager;
 
 namespace Zubi.js
@@ -30,7 +31,7 @@ namespace Zubi.js
             };
 
             var server = new FileServer($"{localOrigin}/", srcPath, session);
-            var bridge = new ZubiWebSocket(
+            var bridge = new WSocket(
                 session,
                 registry,
                 tracker,

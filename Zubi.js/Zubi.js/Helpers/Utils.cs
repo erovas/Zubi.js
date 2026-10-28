@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Zubi.js
+namespace Zubi.js.Helpers
 {
     internal static class Utils
     {
@@ -120,7 +120,7 @@ namespace Zubi.js
                 var prop = type.GetProperty(methodName, BindingFlags.Public | BindingFlags.Instance);
 
                 if (prop is null)
-                    throw new RpcException("", $"'{methodName}' no existe en '{name}'");
+                    throw new InvalidOperationException($"'{methodName}' no existe en '{name}'");
 
                 if (prop.CanRead && args.Length == 0)
                     return prop.GetValue(source);
@@ -131,7 +131,7 @@ namespace Zubi.js
                     return null;
                 }
 
-                throw new RpcException("", $"Demasiados argumentos para '{methodName}' en '{name}'");
+                throw new InvalidOperationException($"Demasiados argumentos para '{methodName}' en '{name}'");
             }
 
             var ps = method.GetParameters();
@@ -152,7 +152,7 @@ namespace Zubi.js
                         converted[i] = p.DefaultValue;
                         continue;
                     }
-                    throw new RpcException("EINVAL", $"Falta el argumento '{p.Name}'");
+                    throw new CodeException("EINVAL", $"Falta el argumento '{p.Name}'");
                 }
                 try
                 {
@@ -160,7 +160,7 @@ namespace Zubi.js
                 }
                 catch (Exception ex)
                 {
-                    throw new RpcException("EARG", $"'{p.Name}': {ex.Message}");
+                    throw new CodeException("EARG", $"'{p.Name}': {ex.Message}");
                 }
             }
 

@@ -7,24 +7,60 @@ namespace FileSystem
     public class FS : Plugin
     {
         public Task<string> ReadFileAsync(string path, string? encoding, CancellationToken ct)
-        => File.ReadAllTextAsync(path, ParseEncoding(encoding), ct);
+        {
+            return File.ReadAllTextAsync(path, ParseEncoding(encoding), ct);
+        }
+        
 
         public Task<byte[]> ReadFileBytesAsync(string path, CancellationToken ct)
-            => File.ReadAllBytesAsync(path, ct);
+        {
+            return File.ReadAllBytesAsync(path, ct);
+        }
 
         public Task WriteFileAsync(string path, string content, string? encoding, CancellationToken ct)
-            => File.WriteAllTextAsync(path, content, ParseEncoding(encoding), ct);
+        {
+            return File.WriteAllTextAsync(path, content, ParseEncoding(encoding), ct);
+        }
 
         public Task WriteFileBytesAsync(string path, byte[] data, CancellationToken ct)
-            => File.WriteAllBytesAsync(path, data, ct);
+        {
+            return File.WriteAllBytesAsync(path, data, ct);
+        }
 
-        public string[] ReadDir(string path) => Directory.GetFileSystemEntries(path);
-        public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-        public void DeleteFile(string path) => File.Delete(path);
-        public void DeleteDir(string path, bool recursive) => Directory.Delete(path, recursive);
-        public void CreateDir(string path) => Directory.CreateDirectory(path);
-        public void Move(string from, string to) => File.Move(from, to, overwrite: true);
-        public void Copy(string from, string to) => File.Copy(from, to, overwrite: true);
+        public string[] ReadDir(string path)
+        {
+            return Directory.GetFileSystemEntries(path);
+        }
+
+        public bool Exists(string path)
+        {
+            return File.Exists(path) || Directory.Exists(path);
+        }
+
+        public void DeleteFile(string path)
+        {
+            File.Delete(path);
+        }
+
+        public void DeleteDir(string path, bool recursive)
+        {
+            Directory.Delete(path, recursive);
+        }
+
+        public void CreateDir(string path)
+        {
+            Directory.CreateDirectory(path);
+        }
+
+        public void Move(string from, string to)
+        {
+            File.Move(from, to, overwrite: true);
+        }
+
+        public void Copy(string from, string to)
+        {
+            File.Copy(from, to, overwrite: true);
+        }
 
         public FileStat Stat(string path)
         {

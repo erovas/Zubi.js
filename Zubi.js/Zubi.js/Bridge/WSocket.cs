@@ -6,18 +6,19 @@ using System.Net.WebSockets;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Zubi.js.Helpers;
 using Zubi.js.PluginManager;
 
 namespace Zubi.js.Bridge
 {
-    internal class ZubiWebSocket
+    internal class WSocket
     {
         private readonly SessionStore _session;
         private readonly Plugins _registry;
         private readonly ConnectionTracker _tracker;
         private readonly HashSet<string> _allowedOrigins;
 
-        public ZubiWebSocket(SessionStore session, Plugins registry, ConnectionTracker tracker, string[] allowedOrigins)
+        public WSocket(SessionStore session, Plugins registry, ConnectionTracker tracker, string[] allowedOrigins)
         {
             _session = session;
             _registry = registry;
@@ -58,6 +59,8 @@ namespace Zubi.js.Bridge
         {
             var sendLock = new SemaphoreSlim(1, 1);
             var pending = new ConcurrentDictionary<long, CancellationTokenSource>();
+            var subscriptions = new Dictionary<string, IDisposable>(StringComparer.Ordinal);
+            var subscriptionsLock = new object();
             var buffer = new byte[16 * 1024];
 
             try
@@ -115,12 +118,26 @@ namespace Zubi.js.Bridge
 
                         var cts = new CancellationTokenSource();
                         pending[id] = cts;
-                        _ = ProcessCallAsync(ws, sendLock, pending, id, uid, method, args, cts.Token);
+                        _ = ProcessCallAsync(
+                                ws, sendLock, pending, 
+                                subscriptions, subscriptionsLock, 
+                                id, uid, method, args, cts.Token);
                     }
                 }
             }
             finally
             {
+                // Quitar los handlers de eventos en C#
+                lock (subscriptionsLock)
+                {
+                    foreach (var sub in subscriptions.Values)
+                        try { sub.Dispose(); } 
+                        catch { }
+                    
+                    subscriptions.Clear();
+                }
+
+                // Cierre socket
                 if (ws.State == WebSocketState.Open)
                     try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", default); }
                     catch { }
@@ -128,6 +145,7 @@ namespace Zubi.js.Bridge
                 try { ws.Dispose(); }
                 catch { }
 
+                // Cancelar operaciones pendientes
                 foreach (var kv in pending)
                     try { kv.Value.Cancel(); kv.Value.Dispose(); }
                     catch { }
@@ -137,12 +155,27 @@ namespace Zubi.js.Bridge
         private async Task ProcessCallAsync(
             WebSocket ws, SemaphoreSlim sendLock,
             ConcurrentDictionary<long, CancellationTokenSource> pending,
+            Dictionary<string, IDisposable> subscriptions, object subscriptionsLock,
             long id, string uid, string method, object?[] args, CancellationToken ct)
         {
             await Task.Yield(); // Cede el hilo actual; la continuación va al thread pool
 
             try
             {
+                if (uid.Equals("Plugins", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (method.Equals("SubscribeEvents", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await HandleSubscribeAsync(ws, sendLock, subscriptions, subscriptionsLock, id, args, ct);
+                        return;
+                    }
+                    if (method.Equals("UnsubscribeEvents", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await HandleUnsubscribeAsync(ws, sendLock, subscriptions, subscriptionsLock, id, args, ct);
+                        return;
+                    }
+                }
+
                 object? result;
 
                 if (uid.Equals("Plugins", StringComparison.OrdinalIgnoreCase))
@@ -175,16 +208,18 @@ namespace Zubi.js.Bridge
             }
             catch (Exception ex)
             {
-                var actual = ex is TargetInvocationException tie && tie.InnerException is not null
-                    ? tie.InnerException : ex;
+                //var actual = ex is TargetInvocationException tie && tie.InnerException is not null
+                //    ? tie.InnerException : ex;
 
-                var (code, msg) = actual switch
-                {
-                    RpcException rex => (rex.Code, rex.Message),
-                    OperationCanceledException => ("EABORT", "Cancelado"),
-                    _ => ("EINTERNAL", actual.Message)
-                };
-                await SendErrorAsync(ws, sendLock, id, code, msg);
+                //var (code, msg) = actual switch
+                //{
+                //    CodeException rex => (rex.Code, rex.Message),
+                //    OperationCanceledException => ("EABORT", "Cancelado"),
+                //    _ => ("EINTERNAL", actual.Message)
+                //};
+                //await SendErrorAsync(ws, sendLock, id, code, msg);
+                var rpc = CodeException.FromException(ex);
+                await SendErrorAsync(ws, sendLock, id, rpc.Code, rpc.Message);
             }
             finally
             {
@@ -215,12 +250,10 @@ namespace Zubi.js.Bridge
             return SendRawAsync(ws, sendLock, Utils.JsonSerialize(payload), ct);
         }
 
-
         private static Task SendErrorAsync(WebSocket ws, SemaphoreSlim sendLock, long id, string code, string message)
         {
             return SendJsonAsync(ws, sendLock, new { id, error = new { code, message } });
         }
-
 
         private static async Task SendRawAsync(WebSocket ws, SemaphoreSlim sendLock, string json, CancellationToken ct)
         {
@@ -233,5 +266,87 @@ namespace Zubi.js.Bridge
             }
             finally { sendLock.Release(); }
         }
+
+        // ─────────────────────────────────────────────────────────────
+        //  SubscribeEvents:  params = [ "pluginUid", "eventName" ]
+        // ─────────────────────────────────────────────────────────────
+        private async Task HandleSubscribeAsync(
+            WebSocket ws, SemaphoreSlim sendLock,
+            Dictionary<string, IDisposable> subscriptions, object subscriptionsLock,
+            long id, object?[] args, CancellationToken ct)
+        {
+            var pluginUid = args.Length > 0 ? ExtractString(args[0]) : null;
+            var eventName = args.Length > 1 ? ExtractString(args[1]) : null;
+
+            if (string.IsNullOrEmpty(pluginUid) || string.IsNullOrEmpty(eventName))
+                throw new InvalidOperationException("Se requiere [pluginUid, eventName]");
+
+            var key = $"{pluginUid}:{eventName}";
+
+            // El callback se ejecuta desde el hilo donde el plugin dispare el evento.
+            // SendJsonAsync serializa con sendLock → seguro desde cualquier hilo.
+            var newSub = _registry.SubscribeEvent(pluginUid, eventName, data =>
+            {
+                _ = SendJsonAsync(ws, sendLock, new
+                {
+                    @event = eventName,
+                    uid = pluginUid,
+                    data
+                });
+            });
+
+            // Si mientras creábamos la suscripción la conexión murió, descartarla.
+            if (ws.State != WebSocketState.Open)
+            {
+                try { newSub.Dispose(); } catch { }
+                throw new CodeException("EABORT", "Conexión cerrada");
+            }
+
+            lock (subscriptionsLock)
+            {
+                if (subscriptions.TryGetValue(key, out var old))
+                    try { old.Dispose(); } catch { }
+                subscriptions[key] = newSub;
+            }
+
+            await SendJsonAsync(ws, sendLock, new { id, result = true }, ct);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  UnsubscribeEvents:  params = [ "pluginUid", "eventName" ]
+        // ─────────────────────────────────────────────────────────────
+        private async Task HandleUnsubscribeAsync(
+            WebSocket ws, SemaphoreSlim sendLock,
+            Dictionary<string, IDisposable> subscriptions, object subscriptionsLock,
+            long id, object?[] args, CancellationToken ct)
+        {
+            var pluginUid = args.Length > 0 ? ExtractString(args[0]) : null;
+            var eventName = args.Length > 1 ? ExtractString(args[1]) : null;
+
+            if (string.IsNullOrEmpty(pluginUid) || string.IsNullOrEmpty(eventName))
+                throw new InvalidOperationException("Se requiere [pluginUid, eventName]");
+
+            var key = $"{pluginUid}:{eventName}";
+
+            lock (subscriptionsLock)
+            {
+                if (subscriptions.TryGetValue(key, out var sub))
+                {
+                    try { sub.Dispose(); } catch { }
+                    subscriptions.Remove(key);
+                }
+            }
+
+            await SendJsonAsync(ws, sendLock, new { id, result = true }, ct);
+        }
+
+        // Extrae un string de un argumento que puede venir como JsonElement o string.
+        private static string? ExtractString(object? arg) => arg switch
+        {
+            string s => s,
+            JsonElement je when je.ValueKind == JsonValueKind.String => je.GetString(),
+            _ => null
+        };
+
     }
 }

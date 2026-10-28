@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/Plugins/">
     <Project Path="FileSystem/FileSystem.csproj" Id="74461262-19dd-4ed4-8adb-0bed0ea4e6cb" />
+    <Project Path="Ticker/Ticker.csproj" Id="d8817eec-8825-4fa5-8e7b-a516b291fc4c" />
   </Folder>
   <Project Path="Zubi.js/Zubi.js.csproj" />
 </Solution>

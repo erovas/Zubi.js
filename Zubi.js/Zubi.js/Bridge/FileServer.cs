@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text;
+using Zubi.js.Helpers;
 using Zubi.js.Scripts;
 
 namespace Zubi.js.Bridge

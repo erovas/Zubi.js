@@ -6,5 +6,5 @@
     Singleton = true,
     Version = "1.0.0",
     Author = "Emanuel R. Vásquez",
-    Description = "Global Storage"
+    Description = "File System"
 )]

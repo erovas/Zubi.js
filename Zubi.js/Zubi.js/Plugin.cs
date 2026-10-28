@@ -8,8 +8,10 @@
 
         #endregion
 
-        public string UID { get; } = Guid.NewGuid().ToString();
         internal Action<string>? OnDisposed;
+        internal string Name = string.Empty;
+
+        public string UID { get; } = Guid.NewGuid().ToString();
         public bool Disposed => Volatile.Read(ref _disposed) == 1;
 
         

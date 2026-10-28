@@ -38,7 +38,8 @@
             this._ws = null;
             this._nextId = 1;
             this._pending = new Map();
-            this._eventHandlers = new Map();
+            this._instanceEvents = new Map();
+            this._subscribedEvents = new Map();
             this._connectPromise = this._connect();
         }
 
@@ -76,12 +77,8 @@
             catch { return; }
 
             if (msg.event) {
-                const handlers = this._eventHandlers.get(msg.event);
-                if (handlers)
-                    for (const h of handlers) {
-                        try { h(msg.data); }
-                        catch { }
-                    }
+                if (msg.uid)
+                    this._dispatchInstanceEvent(msg.uid, msg.event, msg.data);
                 return;
             }
 
@@ -171,20 +168,112 @@
             });
         }
 
-        on(event, handler) {
-            if (!this._eventHandlers.has(event)) 
-                this._eventHandlers.set(event, new Set());
-
-            this._eventHandlers.get(event).add(handler);
-            return () => this._eventHandlers.get(event)?.delete(handler);
-        }
-
         navigate(url) {
             const u = new URL(url);
             if (u.origin !== location.origin) 
                 u.hash = `token=${token}`;
             
             location.href = u.toString();
+        }
+
+        _addInstanceListener(uid, type, listener, rawListener, options) {
+            let events = this._instanceEvents.get(uid);
+            if (!events) { 
+                events = new Map(); 
+                this._instanceEvents.set(uid, events); 
+            }
+
+            let handlers = events.get(type);
+            if (!handlers) { 
+                handlers = new Set(); 
+                events.set(type, handlers); 
+            }
+
+            handlers.add({ listener, raw: rawListener, options });
+        }
+
+        _removeInstanceListener(uid, type, rawListener) {
+            const events = this._instanceEvents.get(uid);
+            if (!events) 
+                return;
+
+            const handlers = events.get(type);
+            if (!handlers) 
+                return;
+
+            for (const entry of [...handlers]) {
+                if (entry.raw === rawListener)
+                    handlers.delete(entry);
+            }
+
+            // Si ya no queda nadie escuchando este evento, damos de baja en C#
+            if (!handlers.size) {
+                events.delete(type);
+
+                const subs = this._subscribedEvents.get(uid);
+                if (subs && subs.has(type)) {
+                    subs.delete(type);
+                    this._call('Plugins', 'UnsubscribeEvents', [uid, type]).catch(() => { });
+                }
+            }
+
+            if (!events.size) this._instanceEvents.delete(uid);
+        }
+
+        _dispatchInstanceEvent(uid, type, detail) {
+            const events = this._instanceEvents.get(uid);
+            if (!events) 
+                return;
+
+            const handlers = events.get(type);
+            if (!handlers || !handlers.size) 
+                return;
+
+            const ev = new CustomEvent(type, { detail });
+            const self = Instances.get(uid) || null;
+
+            for (const entry of [...handlers]) {
+                try {
+                    entry.listener.call(self, ev);
+                    if (entry.options?.once) handlers.delete(entry);
+                } catch (err) {
+                    setTimeout(() => { throw err; });
+                }
+            }
+
+            if (!handlers.size) 
+                events.delete(type);
+        }
+
+        // Devuelve la promesa del SubscribeEvents (idempotente por uid+type)
+        _ensureSubscribed(uid, type) {
+            let subs = this._subscribedEvents.get(uid);
+            if (!subs) { 
+                subs = new Set(); 
+                this._subscribedEvents.set(uid, subs); 
+            }
+
+            if (subs.has(type))
+                return Promise.resolve();
+
+            return this._call('Plugins', 'SubscribeEvents', [uid, type])
+                .then(() => { subs.add(type); })
+                .catch((err) => {
+                    console.error(`[${NAME}] SubscribeEvents falló (${uid}:${type})`, err);
+                    throw err;
+                });
+        }
+
+        // Al Dispose del plugin: damos de baja todo en C# y limpiamos
+        _clearInstanceEvents(uid) {
+            const subs = this._subscribedEvents.get(uid);
+            if (subs) {
+                for (const type of [...subs]) {
+                    this._call('Plugins', 'UnsubscribeEvents', [uid, type]).catch(() => { });
+                }
+                this._subscribedEvents.delete(uid);
+            }
+            this._instanceEvents.delete(uid);
         }
     }
 
@@ -205,13 +294,51 @@
                 
                     case 'UID':
                         return uid;
+
+                    case 'addEventListener':
+                    case 'AddEventListener':
+                        return (type, listener, options) => {
+                            const cb = typeof listener === 'function'
+                                ? listener
+                                : (listener && typeof listener.handleEvent === 'function'
+                                    ? listener.handleEvent.bind(listener)
+                                    : null);
+
+                            if (!cb) 
+                                throw new TypeError('listener inválido');
+
+                            bridge._addInstanceListener(uid, type, cb, listener, options || {});
+                            return bridge._ensureSubscribed(uid, type);
+                        };
+
+                    case 'removeEventListener':
+                    case 'RemoveEventListener':
+                        return (type, listener) => {
+                            bridge._removeInstanceListener(uid, type, listener);
+                        };
+
+                    case 'dispatchEvent':
+                    case 'DispatchEvent':
+                        return (event) => {
+                            bridge._dispatchInstanceEvent(uid, event.type, event.detail);
+                            return true;
+                        };
                 }
 
                 const callable = (...args) => bridge._call(uid, method, args);
                 callable.then = (onFulfilled, onRejected) => bridge._call(uid, method, []).then(onFulfilled, onRejected);
 
-                if(method == 'Dispose')
-                    Instances.delete(uid);
+                // Dispose: ejecuta en C# y limpia en JS (eventos + Instances)
+                if (method === 'Dispose') {
+                    return async (...args) => {
+                        try {
+                            return await bridge._call(uid, method, args);
+                        } finally {
+                            bridge._clearInstanceEvents(uid);
+                            Instances.delete(uid);
+                        }
+                    };
+                }
 
                 return callable;
             },
@@ -227,7 +354,9 @@
                 return Instances.get(uid);
 
             await bridge._call('Plugins', 'GetInstance', [uid]);
-            return makePluginProxy(uid);
+            const instance = makePluginProxy(uid);
+            Instances.set(uid, instance);
+            return instance;
         },
         Load(pluginPath){
             return bridge._call('Plugins', 'Load', [pluginPath]);
@@ -248,6 +377,9 @@
         },
         Unload(pluginName){
             return bridge._call('Plugins', 'Unload', [pluginName]);
+        },
+        Navigate(url){
+            bridge.navigate(url);
         }
     }
 

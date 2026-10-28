@@ -1,11 +1,14 @@
 ﻿using System.Collections.Concurrent;
+using System.Linq.Expressions;
+using System.Reflection;
+using Zubi.js.Helpers;
 
 namespace Zubi.js.PluginManager
 {
     internal sealed class Plugins
     {
-        private readonly ConcurrentDictionary<string, NamePlugin> _Instances = new();
-        private readonly ConcurrentDictionary<Type, NamePlugin> _SingletonInstances = new();
+        private readonly ConcurrentDictionary<string, Plugin> _Instances = new();
+        private readonly ConcurrentDictionary<Type, Plugin> _SingletonInstances = new();
         private readonly Dictionary<string, PluginLoader> _Imported = new();
         private readonly List<PluginMetadata> _LoadedItems = new();
 
@@ -20,7 +23,7 @@ namespace Zubi.js.PluginManager
 
         public Plugin GetInstance(string UID)
         {
-            return (Plugin)_Instances[UID].Value;
+            return _Instances[UID];
         }
 
         public PluginLoadResult Load(string pluginPath)
@@ -45,21 +48,21 @@ namespace Zubi.js.PluginManager
             PluginLoader? pluginLoader = null;
 
             if (!this._Imported.TryGetValue(pluginName, out pluginLoader))
-                throw new Exception($"Plugin [{pluginName}] no exists");
+                throw new InvalidOperationException($"Plugin [{pluginName}] no exists");
 
             Type pluginType = pluginLoader.Type;
 
             // Verifica si el plugin está marcado como singleton.
             if (pluginLoader != null && pluginLoader.Metadata.Singleton)
-                return (Plugin)this._SingletonInstances.GetOrAdd(pluginType, type => CreateInstance(type, pluginName, args)).Value;
+                return this._SingletonInstances.GetOrAdd(pluginType, type => CreateInstance(type, pluginName, args));
 
-            return (Plugin)CreateInstance(pluginType, pluginName, args).Value;
+            return CreateInstance(pluginType, pluginName, args);
         }
 
         public void Unload(string pluginName)
         {
             if (!this._Imported.ContainsKey(pluginName))
-                throw new Exception($"[{pluginName}] Plugin not found.");
+                throw new InvalidOperationException($"[{pluginName}] Plugin not found.");
 
             var ctx = this._Imported[pluginName];
 
@@ -68,14 +71,14 @@ namespace Zubi.js.PluginManager
 
             // Verificar si existe alguna instancia sin hacer Dispose()
             foreach (var instance in instances)
-                if (instance.Value.Value is Plugin plugin && !plugin.Disposed)
-                    throw new Exception($"The [{pluginName}] plugin cannot be unloaded while instances remain undisposed. {Environment.NewLine} Instance UID = {plugin.UID}");
+                if (instance.Value is Plugin plugin && !plugin.Disposed)
+                    throw new InvalidOperationException($"The [{pluginName}] plugin cannot be unloaded while instances remain undisposed. {Environment.NewLine} Instance UID = {plugin.UID}");
 
             foreach (var instance in instances)
                 this._Instances.TryRemove(instance.Key, out _);
 
             // Puede que sea un plugin Singleton
-            this._SingletonInstances.TryRemove(ctx.Type, out NamePlugin? _);
+            this._SingletonInstances.TryRemove(ctx.Type, out Plugin? _);
 
             ctx.Unload();
             this._Imported.Remove(pluginName);
@@ -86,12 +89,33 @@ namespace Zubi.js.PluginManager
 
         internal object? Invoke(string uid, string methodName, object?[] args, CancellationToken ct)
         {
-            if (!_Instances.TryGetValue(uid, out NamePlugin? np))
-                throw new RpcException("", "Instancia no encontrada");
+            if (!_Instances.TryGetValue(uid, out Plugin? plugin))
+                throw new InvalidOperationException("Instancia no encontrada");
 
-            var name = np.Name;
-            var plugin = np.Value;
-            return Utils.Invoke(plugin, name, methodName, args, ct);
+            return Utils.Invoke(plugin, plugin.Name, methodName, args, ct);
+        }
+
+        public IDisposable SubscribeEvent(string pluginUid, string eventName, Action<object?> onFire)
+        {
+            // método ya existente en tu manager
+            var instance = GetInstance(pluginUid) ?? throw new InvalidOperationException($"No existe plugin '{pluginUid}'");
+
+            var evt = instance.GetType().GetEvent(eventName, BindingFlags.Public | BindingFlags.Instance)
+                ?? throw new InvalidOperationException($"El plugin '{instance.Name}' no expone el evento '{eventName}'");
+
+            var add = evt.GetAddMethod(true) ?? throw new InvalidOperationException("Sin add accessor");
+            var remove = evt.GetRemoveMethod(true);
+
+            // Delegado con el tipo exacto del evento (EventHandler<T>, EventHandler, etc.)
+            var bridge = CreateBridge(evt.EventHandlerType!, onFire);
+
+            add.Invoke(instance, new object[] { bridge });
+
+            return new EventSubscription(() =>
+            {
+                try { remove?.Invoke(instance, new object[] { bridge }); } 
+                catch { }
+            });
         }
 
         #endregion
@@ -129,7 +153,7 @@ namespace Zubi.js.PluginManager
             }
         }
 
-        private NamePlugin CreateInstance(Type type, string pluginName, object[] args)
+        private Plugin CreateInstance(Type type, string pluginName, object[] args)
         {
             object? pluginInstance = Activator.CreateInstance(type, args);
 
@@ -138,21 +162,21 @@ namespace Zubi.js.PluginManager
 
             var instance = (Plugin)pluginInstance;
             instance.OnDisposed = PluginOnDisposed;
-            var result = new NamePlugin(pluginName, pluginInstance);
-            this._Instances.TryAdd(instance.UID, result);
+            instance.Name = pluginName;
+            this._Instances.TryAdd(instance.UID, instance);
 
-            return result;
+            return instance;
         }
 
         private void PluginOnDisposed(string UID)
         {
             try
             {
-                if (!this._Instances.TryGetValue(UID, out NamePlugin? instance))
+                if (!this._Instances.TryGetValue(UID, out Plugin? instance))
                     return;
 
                 this._Instances.TryRemove(UID, out _);
-                this._SingletonInstances.TryRemove(instance.Value.GetType(), out _);
+                this._SingletonInstances.TryRemove(((object)instance).GetType(), out _);
             }
             catch (Exception)
             {
@@ -165,20 +189,38 @@ namespace Zubi.js.PluginManager
             return Utils.GetFullDirectory(path);
         }
 
-        #endregion
-
-        private class NamePlugin
+        // Construye un Delegate compatible con la firma del evento.
+        // Convención .NET: último parámetro = payload (args).
+        private static Delegate CreateBridge(Type eventHandlerType, Action<object?> onFire)
         {
-            public string Name { get; }
+            var invoke = eventHandlerType.GetMethod("Invoke") ?? throw new InvalidOperationException("Tipo de evento inválido");
+            
+            var ps = invoke.GetParameters()
+                .Select(p => Expression.Parameter(p.ParameterType, p.Name))
+                .ToArray();
 
-            public object Value { get; }
+            var fire = Expression.Constant(onFire);
 
-            public NamePlugin(string name, object value)
-            {
-                Name = name;
-                Value = value;
-            }
+            var body = ps.Length == 0
+                ? (Expression)Expression.Invoke(fire, Expression.Constant(null, typeof(object)))
+                : Expression.Invoke(fire, Expression.Convert(ps[^1], typeof(object)));
+
+            return Expression.Lambda(eventHandlerType, body, ps).Compile();
         }
 
+        #endregion
+
+    }
+
+    internal sealed class EventSubscription : IDisposable
+    {
+        private readonly Action _detach;
+        private int _disposed;
+        public EventSubscription(Action detach) => _detach = detach;
+        public void Dispose() 
+        { 
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) 
+                _detach(); 
+        }
     }
 }

@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace Zubi.js
+namespace Zubi.js.Helpers
 {
     internal enum ProfileMode
     {
