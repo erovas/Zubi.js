@@ -9,7 +9,10 @@
 
         public event Action? ShutdownRequested;
 
-        public ConnectionTracker(TimeSpan grace) { _grace = grace; }
+        public ConnectionTracker(int grace) 
+        { 
+            _grace = TimeSpan.FromSeconds(grace < 3 ? 3 : grace); 
+        }
 
         public void OnConnected()
         {

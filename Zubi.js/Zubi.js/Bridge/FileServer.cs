@@ -103,7 +103,7 @@ namespace Zubi.js.Bridge
             // Se inyecta la magia
             if (isIndex)
             {
-                var html = exists ? await File.ReadAllTextAsync(full) : ScriptResources.ErrorPage;
+                var html = exists ? await File.ReadAllTextAsync(full) : Resources.ErrorPage;
 
                 if (req.HttpMethod == "GET")
                 {
@@ -111,7 +111,7 @@ namespace Zubi.js.Bridge
                     var meta = tabToken is not null ? $"<meta name=\"bridge-token\" content=\"{tabToken}\">" : string.Empty;
                     var script = "<script>";
                     script += Environment.NewLine;
-                    script += ScriptResources.MainScript;
+                    script += Resources.MainScript;
                     script += Environment.NewLine;
                     script += "</script>";
                     var result = Environment.NewLine + meta + Environment.NewLine + script + Environment.NewLine;
@@ -132,7 +132,6 @@ namespace Zubi.js.Bridge
         {
             return WriteBytesAsync(ctx, status, Encoding.UTF8.GetBytes(text), "text/plain; charset=utf-8");
         }
-
 
         private static async Task WriteBytesAsync(HttpListenerContext ctx, int status, byte[] body, string type, bool securityHeaders = false)
         {

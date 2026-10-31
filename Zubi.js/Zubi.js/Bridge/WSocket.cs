@@ -1,13 +1,10 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Net;
-using System.Net.WebSockets;
-using System.Reflection;
+﻿using System.Net;
 using System.Text;
-using System.Text.Json;
 using Zubi.js.Helpers;
+using System.Text.Json;
+using System.Net.WebSockets;
 using Zubi.js.PluginManager;
+using System.Collections.Concurrent;
 
 namespace Zubi.js.Bridge
 {
@@ -109,8 +106,8 @@ namespace Zubi.js.Bridge
                             continue;
                         }
 
-                        var uid = uidEl.GetString() ?? "";
-                        var method = mEl.GetString() ?? "";
+                        var uid = uidEl.GetString() ?? string.Empty;
+                        var method = mEl.GetString() ?? string.Empty;
                         var args = root.TryGetProperty("params", out var pEl)
                             && pEl.ValueKind == JsonValueKind.Array
                             ? pEl.EnumerateArray().Select(e => (object?)e.Clone()).ToArray()
@@ -139,7 +136,7 @@ namespace Zubi.js.Bridge
 
                 // Cierre socket
                 if (ws.State == WebSocketState.Open)
-                    try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", default); }
+                    try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, default); }
                     catch { }
 
                 try { ws.Dispose(); }
@@ -162,7 +159,7 @@ namespace Zubi.js.Bridge
 
             try
             {
-                if (uid.Equals("Plugins", StringComparison.OrdinalIgnoreCase))
+                if (uid.Equals(Utils.PLUGINS, StringComparison.OrdinalIgnoreCase))
                 {
                     if (method.Equals("SubscribeEvents", StringComparison.OrdinalIgnoreCase))
                     {
@@ -178,8 +175,8 @@ namespace Zubi.js.Bridge
 
                 object? result;
 
-                if (uid.Equals("Plugins", StringComparison.OrdinalIgnoreCase))
-                    result = Utils.Invoke(_registry, "Plugins", method, args, ct);
+                if (uid.Equals(Utils.PLUGINS, StringComparison.OrdinalIgnoreCase))
+                    result = Utils.Invoke(_registry, Utils.PLUGINS, method, args, ct);
                 else
                     result = _registry.Invoke(uid, method, args, ct);
 
@@ -208,16 +205,6 @@ namespace Zubi.js.Bridge
             }
             catch (Exception ex)
             {
-                //var actual = ex is TargetInvocationException tie && tie.InnerException is not null
-                //    ? tie.InnerException : ex;
-
-                //var (code, msg) = actual switch
-                //{
-                //    CodeException rex => (rex.Code, rex.Message),
-                //    OperationCanceledException => ("EABORT", "Cancelado"),
-                //    _ => ("EINTERNAL", actual.Message)
-                //};
-                //await SendErrorAsync(ws, sendLock, id, code, msg);
                 var rpc = CodeException.FromException(ex);
                 await SendErrorAsync(ws, sendLock, id, rpc.Code, rpc.Message);
             }
@@ -332,7 +319,8 @@ namespace Zubi.js.Bridge
             {
                 if (subscriptions.TryGetValue(key, out var sub))
                 {
-                    try { sub.Dispose(); } catch { }
+                    try { sub.Dispose(); } 
+                    catch { }
                     subscriptions.Remove(key);
                 }
             }

@@ -16,12 +16,12 @@ namespace Zubi.js
         private static async Task<int> MainAsync(string[] args)
         {
             var config = Config.Load(Utils.GetFullDirectory("config.json", false));
-            var port = Utils.FindFreePort(config.DebuggingPort);
+            var port = config.Port > 0 ? config.Port : Utils.FindFreePort();
             var localOrigin = $"http://127.0.0.1:{port}";
             var srcPath = App.BaseDirectory;
 
             var session = new SessionStore();
-            var tracker = new ConnectionTracker(TimeSpan.FromSeconds(config.ShutdownGraceSeconds));
+            var tracker = new ConnectionTracker(config.ShutdownSeconds);
             var registry = new Plugins();
             var shutdownTcs = new TaskCompletionSource<bool>();
 
@@ -45,7 +45,7 @@ namespace Zubi.js
             Console.WriteLine($"Master:      {session.MasterToken.Substring(0, 12)}…");
             Console.WriteLine($"Abriendo:    {url}");
 
-            BrowserLauncher.Launch(url, ProfileMode.Shared);
+            BrowserLauncher.Launch(url, config.Browser);
 
             Console.CancelKeyPress += delegate (object? sender, ConsoleCancelEventArgs e)
             {

@@ -22,14 +22,14 @@ namespace Zubi.js.Scripts {
     [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "18.0.0.0")]
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
-    internal class ScriptResources {
+    internal class Resources {
         
         private static global::System.Resources.ResourceManager resourceMan;
         
         private static global::System.Globalization.CultureInfo resourceCulture;
         
         [global::System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1811:AvoidUncalledPrivateCode")]
-        internal ScriptResources() {
+        internal Resources() {
         }
         
         /// <summary>
@@ -39,7 +39,7 @@ namespace Zubi.js.Scripts {
         internal static global::System.Resources.ResourceManager ResourceManager {
             get {
                 if (object.ReferenceEquals(resourceMan, null)) {
-                    global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Zubi.js.Scripts.ScriptResources", typeof(ScriptResources).Assembly);
+                    global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Zubi.js.Scripts.Resources", typeof(Resources).Assembly);
                     resourceMan = temp;
                 }
                 return resourceMan;
@@ -62,25 +62,21 @@ namespace Zubi.js.Scripts {
         
         /// <summary>
         ///   Busca una cadena traducida similar a &lt;!DOCTYPE html&gt;
-        ///&lt;html lang=&quot;en&quot;&gt;
-        ///&lt;!-- https://codepen.io/anna_blok/pen/KKpwRVe --&gt;
+        ///&lt;html lang=&quot;es&quot;&gt;
         ///&lt;head&gt;
         ///    &lt;meta charset=&quot;UTF-8&quot;&gt;
         ///    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot;&gt;
-        ///    &lt;title&gt;WV.js&lt;/title&gt;
+        ///    &lt;title&gt;404 - Index.html not found&lt;/title&gt;
         ///    &lt;style&gt;
-        ///        html, body {
-        ///            padding: 0;
+        ///        * {
         ///            margin: 0;
-        ///            width: 100%;
-        ///            height: 100%;
+        ///            padding: 0;
+        ///            box-sizing: border-box;
         ///        }
         ///
         ///        body {
-        ///            text-align: center;
-        ///            background-color: #222;
-        ///            color: #fff;
-        ///            font-family: &apos; [resto de la cadena truncado]&quot;;.
+        ///            font-family: -apple-system, BlinkMacSystemFont, &apos;Segoe UI&apos;, Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        ///            background: linear-gradient(135deg, #667eea 0 [resto de la cadena truncado]&quot;;.
         /// </summary>
         internal static string ErrorPage {
             get {

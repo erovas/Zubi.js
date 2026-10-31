@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net;
-using System.Net.Sockets;
-using System.Reflection;
-using System.Text;
+﻿using System.Net;
 using System.Text.Json;
+using System.Reflection;
+using System.Net.Sockets;
 using System.Text.Json.Serialization;
 
 namespace Zubi.js.Helpers
@@ -12,6 +9,7 @@ namespace Zubi.js.Helpers
     internal static class Utils
     {
         public const string INDEX_HTML = "index.html";
+        public const string PLUGINS = "Plugins";
 
         private static readonly JsonSerializerOptions Options = new()
         {
@@ -62,16 +60,6 @@ namespace Zubi.js.Helpers
                     listener.Stop();
                 }
             }
-        }
-
-        public static string ReplaceFirst(string text, string search, string replace)
-        {
-            int pos = text.IndexOf(search);
-
-            if (pos < 0) 
-                return text; // No encontrado
-
-            return text.Substring(0, pos) + replace + text.Substring(pos + search.Length);
         }
 
         public static string JsonSerialize(object value)

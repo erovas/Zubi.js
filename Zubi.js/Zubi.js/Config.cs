@@ -4,10 +4,10 @@ namespace Zubi.js
 {
     internal sealed class Config
     {
-        public int DebuggingPort { get; init; }
-        public string[] Plugins { get; init; } = [];
+        public int Port { get; init; }
         public string[] AllowedOrigins { get; init; } = [];
-        public int ShutdownGraceSeconds { get; init; } = 3;
+        public int ShutdownSeconds { get; init; } = 3;
+        public ConfigBrowser Browser { get; init; } = new();
 
         public static Config Load(string path)
         {
@@ -31,5 +31,11 @@ namespace Zubi.js
                 return new Config();
             }
         }
+    }
+
+    internal sealed class ConfigBrowser
+    {
+        public string Name { get; init; } = string.Empty;
+        public ProfileMode Mode { get; init; } = ProfileMode.Named;
     }
 }

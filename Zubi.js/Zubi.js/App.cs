@@ -3,14 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace Zubi.js
 {
-    public enum Platform
-    {
-        FreeBSD,
-        Windows,
-        Linux,
-        OSX
-    }
-
     public static class App
     {
         /// <summary>
@@ -38,6 +30,11 @@ namespace Zubi.js
         /// </summary>
         public static readonly bool IsDebugging;
 
+        /// <summary>
+        /// 
+        /// </summary>
+        public static BrowserData Browser { get; internal set; }
+
         static App()
         {
             BaseDirectory = AppContext.BaseDirectory;
@@ -54,6 +51,7 @@ namespace Zubi.js
 
             Platform = platform;
             IsDebugging = System.Diagnostics.Debugger.IsAttached;
+            Browser = new BrowserData(BrowserEngine.Unknown.ToString(), BrowserEngine.Unknown, string.Empty);
         }
     }
 }
