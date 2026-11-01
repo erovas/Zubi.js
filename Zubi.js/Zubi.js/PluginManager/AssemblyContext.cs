@@ -3,12 +3,12 @@ using System.Runtime.Loader;
 
 namespace Zubi.js.PluginManager
 {
-    internal class PluginLoadContext : AssemblyLoadContext
+    internal class AssemblyContext : AssemblyLoadContext
     {
         private AssemblyDependencyResolver Resolver { get; }
         private List<string> TempFiles { get; }
 
-        public PluginLoadContext(string pluginPath) : base(isCollectible: true)
+        public AssemblyContext(string pluginPath) : base(isCollectible: true)
         {
             this.Resolver = new AssemblyDependencyResolver(pluginPath);
             this.TempFiles = new List<string>();

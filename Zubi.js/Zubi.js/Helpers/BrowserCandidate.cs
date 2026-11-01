@@ -2,7 +2,7 @@
 {
     internal class BrowserCandidate
     {
-        public string Name { get; init; } = "";
+        public string Name { get; init; } = string.Empty;
         public BrowserEngine Engine { get; init; }
         public string[] WindowsPaths { get; init; } = Array.Empty<string>();
         public string[] MacPaths { get; init; } = Array.Empty<string>();

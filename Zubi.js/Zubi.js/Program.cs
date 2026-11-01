@@ -19,10 +19,9 @@ namespace Zubi.js
             var port = config.Port > 0 ? config.Port : Utils.FindFreePort();
             var localOrigin = $"http://127.0.0.1:{port}";
             var srcPath = App.BaseDirectory;
-
+            var plugins = new Plugins();
             var session = new SessionStore();
             var tracker = new ConnectionTracker(config.ShutdownSeconds);
-            var registry = new Plugins();
             var shutdownTcs = new TaskCompletionSource<bool>();
 
             tracker.ShutdownRequested += delegate
@@ -33,7 +32,7 @@ namespace Zubi.js
             var server = new FileServer($"{localOrigin}/", srcPath, session);
             var bridge = new WSocket(
                 session,
-                registry,
+                plugins,
                 tracker,
                 new[] { localOrigin }.Concat(config.AllowedOrigins).ToArray());
 

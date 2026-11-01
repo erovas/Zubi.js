@@ -30,17 +30,17 @@ namespace Zubi.js.Helpers
             if (ex is OperationCanceledException oce)
             {
                 return oce.CancellationToken.IsCancellationRequested
-                    ? new CodeException("EABORT", "Cancelado por el cliente")
-                    : new CodeException("ETIMEDOUT", "Tiempo de espera agotado");
+                    ? new CodeException("EABORT", "Cancelled by the user")
+                    : new CodeException("ETIMEDOUT", "Timed out");
             }
             if (ex is TimeoutException)
                 return new CodeException("ETIMEDOUT", ex.Message);
 
             // 3. Argumentos
             if (ex is ArgumentNullException ane)
-                return new CodeException("EINVAL", $"'{ane.ParamName}' es obligatorio");
+                return new CodeException("EINVAL", $"'{ane.ParamName}' is mandatory");
             if (ex is ArgumentOutOfRangeException aore)
-                return new CodeException("ERANGE", $"'{aore.ParamName}' fuera de rango: {aore.Message}");
+                return new CodeException("ERANGE", $"'{aore.ParamName}' out of range: {aore.Message}");
             if (ex is ArgumentException ae)
                 return new CodeException("EINVAL", ae.Message);
 
@@ -66,11 +66,11 @@ namespace Zubi.js.Helpers
 
             // 7. Memoria
             if (ex is OutOfMemoryException or InsufficientMemoryException)
-                return new CodeException("ENOMEM", "Memoria insuficiente");
+                return new CodeException("ENOMEM", "Insufficient memory");
 
             // 8. Criptografía — AuthenticationTagMismatch antes que Cryptographic genérico
             if (ex is AuthenticationTagMismatchException)
-                return new CodeException("EAUTH", "Tag de autenticación inválido");
+                return new CodeException("EAUTH", "Invalid authentication tag");
             if (ex is CryptographicException)
                 return new CodeException("ECRYPTO", ex.Message);
 
@@ -85,13 +85,13 @@ namespace Zubi.js.Helpers
 
             // 11. Semánticas comunes
             if (ex is PlatformNotSupportedException)
-                return new CodeException("ENOTSUP", $"No soportado en esta plataforma: {ex.Message}");
+                return new CodeException("ENOTSUP", $"Not supported on this platform: {ex.Message}");
             if (ex is NotSupportedException)
                 return new CodeException("ENOTSUP", ex.Message);
             if (ex is NotImplementedException)
                 return new CodeException("ENOTIMPL", ex.Message);
             if (ex is ObjectDisposedException ode)
-                return new CodeException("EINVAL", $"Objeto liberado: {ode.ObjectName ?? ode.GetType().Name}");
+                return new CodeException("EOBJDISP", $"Disposed object: {ode.ObjectName ?? ode.GetType().Name}");
             if (ex is InvalidOperationException)
                 return new CodeException("EINVAL", ex.Message);
 

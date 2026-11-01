@@ -8,10 +8,18 @@
 
         #endregion
 
-        internal Action<string>? OnDisposed;
+        /// <summary>
+        /// Nombre del plugin.
+        /// </summary>
         internal string Name = string.Empty;
 
-        public string UID { get; } = Guid.NewGuid().ToString();
+        /// <summary>
+        /// Identificador unico de la instancia del plugin.
+        /// </summary>
+        internal string UID { get; } = Guid.NewGuid().ToString();
+
+        internal Action<string>? OnDisposed;
+        
         public bool Disposed => Volatile.Read(ref _disposed) == 1;
 
         

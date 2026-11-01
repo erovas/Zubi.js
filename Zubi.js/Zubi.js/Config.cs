@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Zubi.js.Helpers;
 
 namespace Zubi.js
 {
@@ -16,14 +17,7 @@ namespace Zubi.js
 
             try
             {
-                return JsonSerializer.Deserialize<Config>(
-                    File.ReadAllText(path),
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true,
-                        ReadCommentHandling = JsonCommentHandling.Skip,
-                        AllowTrailingCommas = true
-                    }) ?? new Config();
+                return Utils.Deserialize<Config>(File.ReadAllText(path));
             }
             catch (Exception ex)
             {

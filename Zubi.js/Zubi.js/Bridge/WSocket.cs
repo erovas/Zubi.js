@@ -11,14 +11,14 @@ namespace Zubi.js.Bridge
     internal class WSocket
     {
         private readonly SessionStore _session;
-        private readonly Plugins _registry;
+        private readonly Plugins _plugins;
         private readonly ConnectionTracker _tracker;
         private readonly HashSet<string> _allowedOrigins;
 
-        public WSocket(SessionStore session, Plugins registry, ConnectionTracker tracker, string[] allowedOrigins)
+        public WSocket(SessionStore session, Plugins plugins, ConnectionTracker tracker, string[] allowedOrigins)
         {
             _session = session;
-            _registry = registry;
+            _plugins = plugins;
             _tracker = tracker;
             _allowedOrigins = new HashSet<string>(allowedOrigins, StringComparer.OrdinalIgnoreCase);
         }
@@ -102,7 +102,7 @@ namespace Zubi.js.Bridge
 
                         if (!root.TryGetProperty("method", out var mEl))
                         {
-                            await SendErrorAsync(ws, sendLock, id, "EINVAL", "Falta 'method'");
+                            await SendErrorAsync(ws, sendLock, id, "EINVAL", "'method' is missing");
                             continue;
                         }
 
@@ -144,7 +144,11 @@ namespace Zubi.js.Bridge
 
                 // Cancelar operaciones pendientes
                 foreach (var kv in pending)
-                    try { kv.Value.Cancel(); kv.Value.Dispose(); }
+                    try 
+                    { 
+                        kv.Value.Cancel(); 
+                        kv.Value.Dispose(); 
+                    }
                     catch { }
             }
         }
@@ -176,9 +180,9 @@ namespace Zubi.js.Bridge
                 object? result;
 
                 if (uid.Equals(Utils.PLUGINS, StringComparison.OrdinalIgnoreCase))
-                    result = Utils.Invoke(_registry, Utils.PLUGINS, method, args, ct);
+                    result = Utils.Invoke(_plugins, Utils.PLUGINS, method, args, ct);
                 else
-                    result = _registry.Invoke(uid, method, args, ct);
+                    result = _plugins.Invoke(uid, method, args, ct);
 
                 if (result is Task task)
                 {
@@ -201,12 +205,12 @@ namespace Zubi.js.Bridge
                     return;
                 }
 
-                await SendJsonAsync(ws, sendLock, new { id, result }, ct);
+                await SendJsonAsync(ws, sendLock, new { id, result = _plugins.ConvertValue(result) }, ct);
             }
             catch (Exception ex)
             {
                 var rpc = CodeException.FromException(ex);
-                await SendErrorAsync(ws, sendLock, id, rpc.Code, rpc.Message);
+                await SendErrorAsync(ws, sendLock, id, rpc.Code, rpc.Message, uid);
             }
             finally
             {
@@ -237,9 +241,9 @@ namespace Zubi.js.Bridge
             return SendRawAsync(ws, sendLock, Utils.JsonSerialize(payload), ct);
         }
 
-        private static Task SendErrorAsync(WebSocket ws, SemaphoreSlim sendLock, long id, string code, string message)
+        private static Task SendErrorAsync(WebSocket ws, SemaphoreSlim sendLock, long id, string code, string message, string? uid = null)
         {
-            return SendJsonAsync(ws, sendLock, new { id, error = new { code, message } });
+            return SendJsonAsync(ws, sendLock, new { id, error = new { code, message, uid } });
         }
 
         private static async Task SendRawAsync(WebSocket ws, SemaphoreSlim sendLock, string json, CancellationToken ct)
@@ -272,20 +276,21 @@ namespace Zubi.js.Bridge
 
             // El callback se ejecuta desde el hilo donde el plugin dispare el evento.
             // SendJsonAsync serializa con sendLock → seguro desde cualquier hilo.
-            var newSub = _registry.SubscribeEvent(pluginUid, eventName, data =>
+            var newSub = _plugins.SubscribeEvent(pluginUid, eventName, data =>
             {
                 _ = SendJsonAsync(ws, sendLock, new
                 {
                     @event = eventName,
                     uid = pluginUid,
-                    data
+                    data = _plugins.ConvertValue(data)
                 });
             });
 
             // Si mientras creábamos la suscripción la conexión murió, descartarla.
             if (ws.State != WebSocketState.Open)
             {
-                try { newSub.Dispose(); } catch { }
+                try { newSub.Dispose(); } 
+                catch { }
                 throw new CodeException("EABORT", "Conexión cerrada");
             }
 

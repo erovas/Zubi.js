@@ -7,15 +7,38 @@ namespace Zubi.js.PluginManager
 {
     internal sealed class Plugins
     {
+        /// <summary>
+        /// { "UID", Instnace }
+        /// </summary>
         private readonly ConcurrentDictionary<string, Plugin> _Instances = new();
-        private readonly ConcurrentDictionary<Type, Plugin> _SingletonInstances = new();
-        private readonly Dictionary<string, PluginLoader> _Imported = new();
-        private readonly List<PluginMetadata> _LoadedItems = new();
+
+        /// <summary>
+        /// { "AsemmblyName", PluginLoader }
+        /// </summary>
+        private readonly ConcurrentDictionary<string, AssemblyLoader> _Imported = new();
+
+        /// <summary>
+        /// { "PluginName", Type }
+        /// </summary>
+        private readonly ConcurrentDictionary<string, Type> _Types = new();
 
 
         #region Properties
 
-        public PluginMetadata[] Loaded => _LoadedItems.ToArray();
+        public AssemblyData[] Loaded
+        {
+            get
+            {
+                var list = new List<AssemblyData>();
+
+                foreach (var item in _Imported.Values)
+                    list.Add(new AssemblyData(item.Path, item.Name, item.Plugins));
+                
+                return list.ToArray();
+            }
+        }
+
+        internal Action<string>? OnDisposed;
 
         #endregion
 
@@ -26,16 +49,16 @@ namespace Zubi.js.PluginManager
             return _Instances[UID];
         }
 
-        public PluginLoadResult Load(string pluginPath)
+        public AssemblyLoadResult Load(string pluginPath)
         {
             return LoadAux(pluginPath);
         }
 
-        public PluginLoadResult[] LoadFrom(string? folderPath = null)
+        public AssemblyLoadResult[] LoadFrom(string? folderPath = null)
         {
             folderPath = GetFullDirectory(folderPath);
 
-            List<PluginLoadResult> results = new();
+            List<AssemblyLoadResult> results = new();
 
             foreach (string pluginPath in System.IO.Directory.GetFiles(folderPath, "*.dll", SearchOption.AllDirectories))
                 results.Add(LoadAux(pluginPath));
@@ -45,53 +68,42 @@ namespace Zubi.js.PluginManager
 
         public Plugin NewInstance(string pluginName, params object[] args)
         {
-            PluginLoader? pluginLoader = null;
+            Type? plugin = null;
 
-            if (!this._Imported.TryGetValue(pluginName, out pluginLoader))
+            if (!this._Types.TryGetValue(pluginName, out plugin))
                 throw new InvalidOperationException($"Plugin [{pluginName}] no exists");
 
-            Type pluginType = pluginLoader.Type;
-
-            // Verifica si el plugin está marcado como singleton.
-            if (pluginLoader != null && pluginLoader.Metadata.Singleton)
-                return this._SingletonInstances.GetOrAdd(pluginType, type => CreateInstance(type, pluginName, args));
-
-            return CreateInstance(pluginType, pluginName, args);
+            return CreateInstance(plugin, pluginName, args);
         }
 
-        public void Unload(string pluginName)
+        public void Unload(string assemblyName)
         {
-            if (!this._Imported.ContainsKey(pluginName))
-                throw new InvalidOperationException($"[{pluginName}] Plugin not found.");
+            if (!this._Imported.ContainsKey(assemblyName))
+                throw new InvalidOperationException($"[{assemblyName}] Assembly not loaded.");
 
-            var ctx = this._Imported[pluginName];
+            var ctx = this._Imported[assemblyName];
 
-            // Obtener todas las instancias del plugin <uid, object>
-            var instances = this._Instances.Where(i => ctx.Type == i.Value.GetType()).ToList();
+            // Obtener todas las instancias de los plugins de la dll { UID, Object }
+            var instances = _Instances.Where(kv => ctx.Types.Any(t => t.IsInstanceOfType(kv.Value))).ToDictionary();
 
             // Verificar si existe alguna instancia sin hacer Dispose()
-            foreach (var instance in instances)
-                if (instance.Value is Plugin plugin && !plugin.Disposed)
-                    throw new InvalidOperationException($"The [{pluginName}] plugin cannot be unloaded while instances remain undisposed. {Environment.NewLine} Instance UID = {plugin.UID}");
+            foreach (var instance in instances.Values)
+                if (!instance.Disposed)
+                    throw new InvalidOperationException($"The assembly [{assemblyName}] cannot be unloaded because instances of its plugins exist. {Environment.NewLine} Plugin name [{instance.Name}] with UID [{instance.UID}]");
 
+            // Quitar referencias por si hay alguna
             foreach (var instance in instances)
                 this._Instances.TryRemove(instance.Key, out _);
 
-            // Puede que sea un plugin Singleton
-            this._SingletonInstances.TryRemove(ctx.Type, out Plugin? _);
-
             ctx.Unload();
-            this._Imported.Remove(pluginName);
-            var item = _LoadedItems.FirstOrDefault(x => x.Name == pluginName);
-            if (item != null)
-                _LoadedItems.Remove(item);
+            this._Imported.TryRemove(assemblyName, out _);
         }
 
-        internal object? Invoke(string uid, string methodName, object?[] args, CancellationToken ct)
+        public object? Invoke(string uid, string methodName, object?[] args, CancellationToken ct)
         {
             if (!_Instances.TryGetValue(uid, out Plugin? plugin))
-                throw new InvalidOperationException("Instancia no encontrada");
-
+                throw new ObjectDisposedException("Instance disposed");
+            
             return Utils.Invoke(plugin, plugin.Name, methodName, args, ct);
         }
 
@@ -118,38 +130,82 @@ namespace Zubi.js.PluginManager
             });
         }
 
+        public object? ConvertValue(object? obj)
+        {
+            if (obj is null)
+                return null;
+
+            if (typeof(Plugin).IsAssignableFrom(obj.GetType()))
+            {
+                var plugin = (Plugin)obj;
+                var uid = plugin.UID;
+
+                // Si la instancia se ha creado desde otra parte, se registra.
+                if (!_Instances.ContainsKey(uid))
+                {
+                    plugin.OnDisposed = PluginOnDisposed;
+                    _Instances.TryAdd(uid, plugin);
+                }
+
+                return new { ___UID___ = uid };
+            }
+
+            return obj;
+        }
+
         #endregion
 
         #region Helpers
 
-        private PluginLoadResult LoadAux(string pluginPath)
+        private AssemblyLoadResult LoadAux(string assemblyPath)
         {
             try
             {
-                pluginPath = GetFullDirectory(pluginPath);
+                assemblyPath = GetFullDirectory(assemblyPath);
 
-                foreach (var md in this._Imported.Values.ToList().Select(x => x.Metadata))
-                    if (md.Path == pluginPath)
-                        return PluginLoadResult.Ok(md);
+                // Verificar si ya estaba cargada la dll
+                foreach (var val in this._Imported.Values)
+                    if (val.Path == assemblyPath)
+                        return AssemblyLoadResult.Ok(val);
 
-                var pluginLoader = new PluginLoader(pluginPath);
-                var metadata = pluginLoader.Metadata;
-                var name = metadata.Name;
-                var path = metadata.Path;
+                var asmLoader = new AssemblyLoader(assemblyPath);
 
-                if (this._Imported.ContainsKey(name))
+                // Verificar si al menos se ha cargado algun plugin
+                if (asmLoader.Types.Length == 0)
                 {
-                    pluginLoader.Unload();
-                    return PluginLoadResult.Fail(metadata, $"A plugin named [{name}] has already been loaded from the path [{this._Imported[name].Metadata.Path}].");
+                    asmLoader.Unload();
+                    return AssemblyLoadResult.Fail(asmLoader, "There are no plugin defined in the assembly");
+                }
+                
+                foreach (var item in this._Imported.Values)
+                {
+                    // Verificar si existe otra dll con el mismo nombre
+                    if(item.Name == asmLoader.Name)
+                    {
+                        var retVal = AssemblyLoadResult.Fail(asmLoader, $"An assembly with the same name is already loaded at [{item.Path}].");
+                        asmLoader.Unload();
+                        return retVal;
+                    }
+
+                    // Verificar si otra dll tiene cargado un plugin con el mismo nombre
+                    string? pluginName = item.Types.FirstOrDefault(p1 => asmLoader.Types.Any(p2 => p1.Name == p2.Name))?.Name;
+                    if (pluginName != null)
+                    {
+                        var retVal = AssemblyLoadResult.Fail(asmLoader, $"The plugin named [{pluginName}] already exists in the assembly [{item.Path}].");
+                        asmLoader.Unload();
+                        return retVal;
+                    }
                 }
 
-                this._Imported.Add(name, pluginLoader);
-                this._LoadedItems.Add(metadata);
-                return PluginLoadResult.Ok(metadata);
+                foreach (var item in asmLoader.Types)
+                    this._Types.TryAdd(item.Name, item);
+                
+                this._Imported.TryAdd(asmLoader.Name, asmLoader);
+                return AssemblyLoadResult.Ok(asmLoader);
             }
             catch (Exception ex)
             {
-                return PluginLoadResult.Fail(pluginPath, ex.Message);
+                return AssemblyLoadResult.Fail(assemblyPath, ex.Message);
             }
         }
 
@@ -172,11 +228,10 @@ namespace Zubi.js.PluginManager
         {
             try
             {
-                if (!this._Instances.TryGetValue(UID, out Plugin? instance))
+                if (!this._Instances.ContainsKey(UID))
                     return;
 
                 this._Instances.TryRemove(UID, out _);
-                this._SingletonInstances.TryRemove(((object)instance).GetType(), out _);
             }
             catch (Exception)
             {
@@ -184,7 +239,7 @@ namespace Zubi.js.PluginManager
             }
         }
 
-        private string GetFullDirectory(string? path)
+        private static string GetFullDirectory(string? path)
         {
             return Utils.GetFullDirectory(path);
         }
@@ -223,4 +278,5 @@ namespace Zubi.js.PluginManager
                 _detach(); 
         }
     }
+
 }

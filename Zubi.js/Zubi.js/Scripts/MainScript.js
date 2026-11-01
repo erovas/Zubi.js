@@ -2,21 +2,22 @@
     'use strict';
 
     const NAME = 'Zubi.js';
+    const UID = '___UID___';
 
     // ---- Token ----
     const meta = document.querySelector('meta[name="bridge-token"]');
-    let token = meta?.content;
+    let TOKEN = meta?.content;
 
-    if (!token && location.hash.startsWith('#token=')) {
-        token = location.hash.slice('#token='.length);
-        sessionStorage.setItem('bridge_token', token);
+    if (!TOKEN && location.hash.startsWith('#token=')) {
+        TOKEN = location.hash.slice('#token='.length);
+        sessionStorage.setItem('bridge_token', TOKEN);
         history.replaceState(null, '', location.pathname + location.search);
     }
 
-    if (!token)
-        token = sessionStorage.getItem('bridge_token');
+    if (!TOKEN)
+        TOKEN = sessionStorage.getItem('bridge_token');
 
-    if (!token) {
+    if (!TOKEN) {
         console.error(`[${NAME}] Sin token. La app no se autenticará.`);
         window.native = new Proxy({}, {
             get: () => () => Promise.reject(new Error('Bridge not authenticated')),
@@ -24,36 +25,64 @@
         return;
     }
 
-    sessionStorage.setItem('bridge_token', token);
+    sessionStorage.setItem('bridge_token', TOKEN);
 
     // ---- WebSocket ----
-    const wsUrl = window.__BRIDGE_WS_URL__ || `ws://${location.host}/ws?token=${encodeURIComponent(token)}`;
+    const wsUrl = window.__BRIDGE_WS_URL__ || `ws://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`;
 
-    const Instances = new Map();
+    /**
+     * Map<"UID Instance", Proxy>> 
+     * @type {Map<string, Proxy>} 
+    */
+    const PluginInstances = new Map();
 
     class NativeBridge {
 
+        /** @type {string} */
+        #url;
+        /** @type {WebSocket} */
+        #ws;
+        /** @type {Number} */
+        #nextId;
+        /** @type {Map<Number, Promise>} */
+        #pending;
+        /**
+         * Map<"UID Instance", Map<"EventName", Set<{...}>>> 
+         * @type {Map<string, Map<string, Set<{ listener: Function, raw: Function, options: Any }>>>} 
+        */
+        #instanceEvents;
+        /**
+         * Map<"UID Instance", Set<"EventName">> 
+         * @type {Map<string, Set<string>>} 
+        */
+        #subscribedEvents;
+        /** @type {Promise} */
+        #connectPromise;
+
+        /**
+         * 
+         * @param {string} url 
+         */
         constructor(url) {
-            this._url = url;
-            this._ws = null;
-            this._nextId = 1;
-            this._pending = new Map();
-            this._instanceEvents = new Map();
-            this._subscribedEvents = new Map();
-            this._connectPromise = this._connect();
+            this.#url = url;
+            this.#nextId = 1;
+            this.#pending = new Map();
+            this.#instanceEvents = new Map();
+            this.#subscribedEvents = new Map();
+            this.#connectPromise = this.#connect();
         }
 
-        _connect() {
+        #connect() {
             return new Promise((resolve, reject) => {
-                const ws = new WebSocket(this._url);
-                this._ws = ws;
+                const ws = new WebSocket(this.#url);
+                this.#ws = ws;
 
                 ws.addEventListener('open', () => {
                     console.log(`[${NAME}] Connected`);
                     resolve();
                 });
 
-                ws.addEventListener('message', (e) => this._onMessage(e));
+                ws.addEventListener('message', (e) => this.#onMessage(e));
 
                 ws.addEventListener('error', () => {
                     if (ws.readyState !== WebSocket.OPEN) 
@@ -63,30 +92,32 @@
                 ws.addEventListener('close', () => {
                     console.warn(`[${NAME}] Disconnected`);
                     
-                    for (const [, entry] of this._pending) 
+                    for (const [, entry] of this.#pending) 
                         entry.reject(new Error('Connection closed'));
                     
-                    this._pending.clear();
+                    this.#pending.clear();
                 });
             });
         }
 
-        _onMessage(event) {
+        #onMessage(event) {
             let msg;
             try { msg = JSON.parse(event.data); }
             catch { return; }
 
+            // Disparo de evento de C# para JS
             if (msg.event) {
                 if (msg.uid)
-                    this._dispatchInstanceEvent(msg.uid, msg.event, msg.data);
+                    this.DispatchInstanceEvent(msg.uid, msg.event, this.#convertValue(msg.data));
                 return;
             }
 
-            const entry = this._pending.get(msg.id);
+            const entry = this.#pending.get(msg.id);
 
             if (!entry)
                 return;
 
+            // Descarga de datos por trozos
             if (msg.chunk !== undefined) {
                 if (entry.onChunk) {
                     const raw = atob(msg.chunk);
@@ -98,31 +129,68 @@
                     entry.chain = entry.chain
                         .then(() => entry.onChunk(bytes))
                         .catch((err) => {
-                            this._pending.delete(msg.id);
-                            this._ws.send(JSON.stringify({ id: msg.id, cancel: true }));
+                            this.#pending.delete(msg.id);
+                            this.#ws.send(JSON.stringify({ id: msg.id, cancel: true }));
                             entry.reject(err);
                         });
                 }
                 return;
             }
 
-            this._pending.delete(msg.id);
+            // Eliminar registro tarea (llamada de metodo/propiedad C# desde JS)
+            this.#pending.delete(msg.id);
+
+            // Fin de descarga de datos por trozos
             if (msg.end) { 
                 entry.resolve(msg.result); 
                 return; 
             }
             
+            // Error al llamar metodo/propiedad
             if (msg.error) {
                 const err = new Error(msg.error.message || 'RPC error');
+                const uid = msg.error.uid;
                 err.code = msg.error.code;
+                // Es una instancia ya liberada
+                if(uid && err.code === 'EOBJDISP' && PluginInstances.has(uid)){
+                    this.ClearInstanceEvents(uid);
+                    PluginInstances.delete(uid);
+                }
                 entry.reject(err);
                 return;
             }
-            entry.resolve(msg.result);
+
+            // Valor de retorno C#, OK
+            entry.resolve(this.#convertValue(msg.result));
         }
 
-        async _call(uid, method, args) {
-            await this._connectPromise;
+        /**
+         * Varificar si lo que viene de C# es un plugin, retornar el Proxy si lo es.
+         * @param {any} obj 
+         * @returns 
+         */
+        #convertValue(obj){
+            if(obj && obj[UID]){
+                const uid = obj[UID];
+
+                if(PluginInstances.has(uid))
+                    return PluginInstances.get(uid);
+                else
+                    return MakePluginProxy(uid);
+            }
+
+            return obj;
+        }
+
+        /**
+         * Llamar a un método/getter/setter de una instancia de una clase en C#
+         * @param {string} uid - UID de la instancia del plugin.
+         * @param {string} method - Nombre método/getter/setter del plugin que se quiere llamar.
+         * @param {object[]} args - Parametros que se le pasan al método/getter/setter.
+         * @returns 
+         */
+        async Call(uid, method, args) {
+            await this.#connectPromise;
 
             // Último argumento puede ser opts: { signal, onChunk }
             let opts = null;
@@ -135,7 +203,7 @@
                 }
             }
 
-            const id = this._nextId++;
+            const id = this.#nextId++;
             return new Promise((resolve, reject) => {
                 const entry = { 
                     resolve, 
@@ -143,44 +211,44 @@
                     onChunk: opts?.onChunk,
                     chain: Promise.resolve(),
                 };
-                this._pending.set(id, entry);
+                this.#pending.set(id, entry);
 
                 if (opts?.signal) {
                     if (opts.signal.aborted) {
-                        this._pending.delete(id);
+                        this.#pending.delete(id);
                         reject(new DOMException('Aborted', 'AbortError'));
                         return;
                     }
                     opts.signal.addEventListener('abort', () => {
-                        this._pending.delete(id);
-                        try { this._ws.send(JSON.stringify({ id, cancel: true })); } 
+                        this.#pending.delete(id);
+                        try { this.#ws.send(JSON.stringify({ id, cancel: true })); } 
                         catch { }
                         reject(new DOMException('Aborted', 'AbortError'));
                     }, { once: true });
                 }
 
                 try {
-                    this._ws.send(JSON.stringify({ uid, id, method, params: args }));
+                    this.#ws.send(JSON.stringify({ uid, id, method, params: args }));
                 } catch (e) {
-                    this._pending.delete(id);
+                    this.#pending.delete(id);
                     reject(e);
                 }
             });
         }
 
-        navigate(url) {
-            const u = new URL(url);
-            if (u.origin !== location.origin) 
-                u.hash = `token=${token}`;
-            
-            location.href = u.toString();
-        }
-
-        _addInstanceListener(uid, type, listener, rawListener, options) {
-            let events = this._instanceEvents.get(uid);
+        /**
+         * 
+         * @param {string} uid - UID de la instancia del plugin.
+         * @param {string} type - Nombre del evento.
+         * @param {Function} listener - Manejador JS enlazado.
+         * @param {Function} rawListener - Manejador JS original.
+         * @param {*} options 
+         */
+        AddInstanceListener(uid, type, listener, rawListener, options) {
+            let events = this.#instanceEvents.get(uid);
             if (!events) { 
                 events = new Map(); 
-                this._instanceEvents.set(uid, events); 
+                this.#instanceEvents.set(uid, events); 
             }
 
             let handlers = events.get(type);
@@ -192,8 +260,15 @@
             handlers.add({ listener, raw: rawListener, options });
         }
 
-        _removeInstanceListener(uid, type, rawListener) {
-            const events = this._instanceEvents.get(uid);
+        /**
+         * 
+         * @param {string} uid - UID de la instancia del plugin.
+         * @param {string} type - Nombre del evento.
+         * @param {Function} rawListener - Manejador JS original del evento.
+         * @returns 
+         */
+        RemoveInstanceListener(uid, type, rawListener) {
+            const events = this.#instanceEvents.get(uid);
             if (!events) 
                 return;
 
@@ -210,18 +285,25 @@
             if (!handlers.size) {
                 events.delete(type);
 
-                const subs = this._subscribedEvents.get(uid);
+                const subs = this.#subscribedEvents.get(uid);
                 if (subs && subs.has(type)) {
                     subs.delete(type);
-                    this._call('Plugins', 'UnsubscribeEvents', [uid, type]).catch(() => { });
+                    this.Call('Plugins', 'UnsubscribeEvents', [uid, type]).catch(() => { });
                 }
             }
 
-            if (!events.size) this._instanceEvents.delete(uid);
+            if (!events.size) this.#instanceEvents.delete(uid);
         }
 
-        _dispatchInstanceEvent(uid, type, detail) {
-            const events = this._instanceEvents.get(uid);
+        /**
+         * 
+         * @param {string} uid - UID de la instancia del plugin.
+         * @param {string} type - Nombre del evento.
+         * @param {*} detail 
+         * @returns 
+         */
+        DispatchInstanceEvent(uid, type, detail) {
+            const events = this.#instanceEvents.get(uid);
             if (!events) 
                 return;
 
@@ -230,12 +312,13 @@
                 return;
 
             const ev = new CustomEvent(type, { detail });
-            const self = Instances.get(uid) || null;
+            const self = PluginInstances.get(uid) || null;
 
             for (const entry of [...handlers]) {
                 try {
                     entry.listener.call(self, ev);
-                    if (entry.options?.once) handlers.delete(entry);
+                    if (entry.options?.once) 
+                        handlers.delete(entry);
                 } catch (err) {
                     setTimeout(() => { throw err; });
                 }
@@ -245,18 +328,23 @@
                 events.delete(type);
         }
 
-        // Devuelve la promesa del SubscribeEvents (idempotente por uid+type)
-        _ensureSubscribed(uid, type) {
-            let subs = this._subscribedEvents.get(uid);
+        /**
+         * Devuelve la promesa del SubscribeEvents (idempotente por uid+type)
+         * @param {string} uid - UID Plugin instance
+         * @param {string} type - Event name
+         * @returns 
+         */
+        EnsureSubscribed(uid, type) {
+            let subs = this.#subscribedEvents.get(uid);
             if (!subs) { 
                 subs = new Set(); 
-                this._subscribedEvents.set(uid, subs); 
+                this.#subscribedEvents.set(uid, subs); 
             }
 
             if (subs.has(type))
                 return Promise.resolve();
 
-            return this._call('Plugins', 'SubscribeEvents', [uid, type])
+            return this.Call('Plugins', 'SubscribeEvents', [uid, type])
                 .then(() => { subs.add(type); })
                 .catch((err) => {
                     console.error(`[${NAME}] SubscribeEvents falló (${uid}:${type})`, err);
@@ -264,22 +352,31 @@
                 });
         }
 
-        // Al Dispose del plugin: damos de baja todo en C# y limpiamos
-        _clearInstanceEvents(uid) {
-            const subs = this._subscribedEvents.get(uid);
+        /**
+         * Al hacer Dispose del plugin, se da de baja todo en C# y limpiamos
+         * @param {string} uid 
+         */
+        ClearInstanceEvents(uid) {
+            const subs = this.#subscribedEvents.get(uid);
             if (subs) {
                 for (const type of [...subs]) {
-                    this._call('Plugins', 'UnsubscribeEvents', [uid, type]).catch(() => { });
+                    this.Call('Plugins', 'UnsubscribeEvents', [uid, type]).catch(() => { });
                 }
-                this._subscribedEvents.delete(uid);
+                this.#subscribedEvents.delete(uid);
             }
-            this._instanceEvents.delete(uid);
+            this.#instanceEvents.delete(uid);
         }
+
     }
 
-    const bridge = new NativeBridge(wsUrl);
+    const Bridge = new NativeBridge(wsUrl);
 
-    function makePluginProxy(uid) {
+    /**
+     * 
+     * @param {string} uid 
+     * @returns 
+     */
+    function MakePluginProxy(uid) {
         return new Proxy({}, {
             get(_, method) {
 
@@ -295,7 +392,6 @@
                     case 'UID':
                         return uid;
 
-                    case 'addEventListener':
                     case 'AddEventListener':
                         return (type, listener, options) => {
                             const cb = typeof listener === 'function'
@@ -307,38 +403,36 @@
                             if (!cb) 
                                 throw new TypeError('listener inválido');
 
-                            bridge._addInstanceListener(uid, type, cb, listener, options || {});
-                            return bridge._ensureSubscribed(uid, type);
+                            Bridge.AddInstanceListener(uid, type, cb, listener, options || {});
+                            return Bridge.EnsureSubscribed(uid, type);
                         };
 
-                    case 'removeEventListener':
                     case 'RemoveEventListener':
                         return (type, listener) => {
-                            bridge._removeInstanceListener(uid, type, listener);
+                            Bridge.RemoveInstanceListener(uid, type, listener);
                         };
 
-                    case 'dispatchEvent':
                     case 'DispatchEvent':
                         return (event) => {
-                            bridge._dispatchInstanceEvent(uid, event.type, event.detail);
+                            Bridge.DispatchInstanceEvent(uid, event.type, event.detail);
                             return true;
                         };
                 }
-
-                const callable = (...args) => bridge._call(uid, method, args);
-                callable.then = (onFulfilled, onRejected) => bridge._call(uid, method, []).then(onFulfilled, onRejected);
 
                 // Dispose: ejecuta en C# y limpia en JS (eventos + Instances)
                 if (method === 'Dispose') {
                     return async (...args) => {
                         try {
-                            return await bridge._call(uid, method, args);
+                            return await Bridge.Call(uid, method, args);
                         } finally {
-                            bridge._clearInstanceEvents(uid);
-                            Instances.delete(uid);
+                            Bridge.ClearInstanceEvents(uid);
+                            PluginInstances.delete(uid);
                         }
                     };
                 }
+
+                const callable = (...args) => Bridge.Call(uid, method, args);
+                callable.then = (onFulfilled, onRejected) => Bridge.Call(uid, method, []).then(onFulfilled, onRejected);
 
                 return callable;
             },
@@ -347,39 +441,35 @@
 
     const PluginsApi = {
         get Loaded(){
-            return bridge._call('Plugins', 'Loaded', []);
+            return Bridge.Call('Plugins', 'Loaded', []);
         },
         async GetInstance(uid) {
-            if(Instances.has(uid))
-                return Instances.get(uid);
+            if(PluginInstances.has(uid))
+                return PluginInstances.get(uid);
 
-            await bridge._call('Plugins', 'GetInstance', [uid]);
-            const instance = makePluginProxy(uid);
-            Instances.set(uid, instance);
+            await Bridge.Call('Plugins', 'GetInstance', [uid]);
+            const instance = MakePluginProxy(uid);
+            PluginInstances.set(uid, instance);
             return instance;
         },
         Load(pluginPath){
-            return bridge._call('Plugins', 'Load', [pluginPath]);
+            return Bridge.Call('Plugins', 'Load', [pluginPath]);
         },
         LoadFrom(folderPath = null){
-            return bridge._call('Plugins', 'LoadFrom', [folderPath]);
+            return Bridge.Call('Plugins', 'LoadFrom', [folderPath]);
         },
-        async NewInstance(pluginName, ...args){
-            const result = await bridge._call('Plugins', 'NewInstance', [pluginName, args]);
-            const uid = result.uid;
-
-            if(Instances.has(uid))
-                return Instances.get(uid);
-
-            const instance = makePluginProxy(uid);
-            Instances.set(uid, instance);
-            return instance;
+        NewInstance(pluginName, ...args){
+           return Bridge.Call('Plugins', 'NewInstance', [pluginName, args]);
         },
         Unload(pluginName){
-            return bridge._call('Plugins', 'Unload', [pluginName]);
+            return Bridge.Call('Plugins', 'Unload', [pluginName]);
         },
         Navigate(url){
-            bridge.navigate(url);
+            const u = new URL(url);
+            if (u.origin !== location.origin) 
+                u.hash = `token=${TOKEN}`;
+            
+            location.href = u.toString();
         }
     }
 
@@ -389,3 +479,39 @@
 
     console.log(`[${NAME}] Ready`);
 })();
+
+/*
+
+(async _ =>{
+    const Plugins = window.Zubi
+    const results = await Plugins.LoadFrom();
+    console.log(results);
+    const FS = await Plugins.NewInstance('FS');
+    console.log(await FS.UID);
+    console.log(await FS.Exists(`C:/Users/Manurov/Documents`))
+    const ticker = await FS.Ticker;
+    // Suscripción (el await es opcional; el handler ya está registrado síncronamente)
+    ticker.AddEventListener("Tick", (e) => {
+        console.log(`Tick #${e.detail.Count} a las ${e.detail.Timestamp}`);
+    });
+
+    // Una sola vez
+    ticker.AddEventListener("Started", (e) => {
+        console.log("Ticker arrancado");
+    }, { once: true });
+
+    // Alias compatible con tu ejemplo
+    await ticker.AddEventListener("Stopped", (e) => {
+        console.log("Ticker detenido");
+    });
+
+    await ticker.Start(500);
+
+    setTimeout(_ => {
+        FS.Dispose();
+        console.log("FS Disposed")
+    }, 5000)
+})();
+
+*/
+
