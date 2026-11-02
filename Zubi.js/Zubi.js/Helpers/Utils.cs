@@ -1,7 +1,9 @@
 ﻿using System.Net;
 using System.Text.Json;
 using System.Reflection;
+using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 
 namespace Zubi.js.Helpers
@@ -197,5 +199,187 @@ namespace Zubi.js.Helpers
             }
         }
 
+        public static (int Width, int Height) GetWidthHeight(int width, int height)
+        {
+            return (width < 0 ? 800 : width, height < 0 ? 600 : height);
+        }
+
+        public static (int Width, int Height) GetPrimaryScreenSize()
+        {
+            try
+            {
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    return GetWindowsScreenSize();
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    return GetMacScreenSize();
+                return GetLinuxScreenSize();
+            }
+            catch { }
+
+            // Fallback conservador si todo falla
+            return (1920, 1080);
+        }
+
+        // ---------- Windows: P/Invoke puro a user32.dll ----------
+
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT { public int Left, Top, Right, Bottom; }
+
+        private const int SM_CXSCREEN = 0;  // ancho de la pantalla primaria
+        private const int SM_CYSCREEN = 1;  // alto de la pantalla primaria
+        private const uint SPI_GETWORKAREA = 0x0030;
+
+        private static (int Width, int Height) GetWindowsScreenSize()
+        {
+            // Área de trabajo: excluye la barra de tareas y respeta la posición
+            var rect = new RECT();
+            if (SystemParametersInfo(SPI_GETWORKAREA, 0, ref rect, 0))
+                return (rect.Right - rect.Left, rect.Bottom - rect.Top);
+
+            // Fallback: pantalla completa
+            return (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+        }
+
+        // ---------- macOS: osascript (sin dependencias .NET) ----------
+
+        private static (int Width, int Height) GetMacScreenSize()
+        {
+            string? output = RunAndRead("/usr/bin/osascript", new[]
+            {
+                "-e", "tell application \"Finder\" to get bounds of window of desktop"
+            });
+
+            // Salida típica: "0, 0, 1920, 1080"
+            if (!string.IsNullOrEmpty(output))
+            {
+                var parts = output.Split(',', StringSplitOptions.TrimEntries);
+                if (parts.Length == 4 &&
+                    int.TryParse(parts[2], out int w) &&
+                    int.TryParse(parts[3], out int h))
+                    return (w, h);
+            }
+            return (1920, 1080);
+        }
+
+        // ---------- Linux: xrandr → xdpyinfo → /sys/class/drm ----------
+
+        private static (int Width, int Height) GetLinuxScreenSize()
+        {
+            // 1) xrandr (X11). Buscamos la línea del modo actual, marcada con '*'
+            string? xrandr = RunAndRead("/usr/bin/xrandr", new[] { "--current" });
+            if (!string.IsNullOrEmpty(xrandr))
+            {
+                foreach (var line in xrandr.Split('\n'))
+                {
+                    if (!line.Contains('*')) continue;
+                    string trimmed = line.Trim();
+                    int plus = trimmed.IndexOf('+');
+                    string sizePart = plus > 0
+                        ? trimmed.Substring(0, plus)
+                        : trimmed.Split(' ')[0];
+                    var dims = sizePart.Split('x');
+                    if (dims.Length == 2 &&
+                        int.TryParse(dims[0], out int w) &&
+                        int.TryParse(dims[1], out int h))
+                        return (w, h);
+                }
+            }
+
+            // 2) xdpyinfo (X11 alternativo)
+            string? xdpy = RunAndRead("/usr/bin/xdpyinfo", Array.Empty<string>());
+            if (!string.IsNullOrEmpty(xdpy))
+            {
+                foreach (var line in xdpy.Split('\n'))
+                {
+                    if (!line.Contains("dimensions:")) continue;
+                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var part in parts)
+                    {
+                        var dims = part.Split('x');
+                        if (dims.Length == 2 &&
+                            int.TryParse(dims[0], out int w) &&
+                            int.TryParse(dims[1], out int h))
+                            return (w, h);
+                    }
+                }
+            }
+
+            // 3) Fallback vía DRM: cubre Wayland y sistemas sin xrandr/xdpyinfo
+            try
+            {
+                foreach (var dir in Directory.GetDirectories("/sys/class/drm", "card*-*"))
+                {
+                    string statusPath = Path.Combine(dir, "status");
+                    if (!File.Exists(statusPath)) continue;
+                    if (File.ReadAllText(statusPath).Trim() != "connected") continue;
+
+                    string modesPath = Path.Combine(dir, "modes");
+                    if (!File.Exists(modesPath)) continue;
+
+                    string? firstMode = File.ReadLines(modesPath).FirstOrDefault();
+                    if (string.IsNullOrEmpty(firstMode)) continue;
+
+                    var dims = firstMode.Split('x');
+                    if (dims.Length == 2 &&
+                        int.TryParse(dims[0], out int w) &&
+                        int.TryParse(dims[1], out int h))
+                        return (w, h);
+                }
+            }
+            catch { }
+
+            return (1920, 1080);
+        }
+
+        /// <summary>
+        /// Ejecuta un proceso, lee su stdout y devuelve el texto (trim). Devuelve null si falla,
+        /// tarda más de <paramref name="timeoutMs"/> o no se puede lanzar.
+        /// </summary>
+        private static string? RunAndRead(string fileName, string[] args, int timeoutMs = 3000)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(fileName)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                foreach (var a in args) psi.ArgumentList.Add(a);
+
+                using var proc = Process.Start(psi);
+                if (proc is null) return null;
+
+                // Lanzamos las lecturas async antes de esperar al proceso.
+                // Así evitamos el deadlock típico cuando el buffer del pipe se llena.
+                var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                var stderrTask = proc.StandardError.ReadToEndAsync();
+
+                if (!proc.WaitForExit(timeoutMs))
+                {
+                    try { proc.Kill(entireProcessTree: true); } catch { /* ignorar */ }
+                    return null;
+                }
+
+                // El WaitForExit(int) NO drena los streams async. Hay que llamar
+                // al WaitForExit() sin timeout para garantizar que se completen.
+                proc.WaitForExit();
+
+                string output = stdoutTask.GetAwaiter().GetResult().Trim();
+                _ = stderrTask.GetAwaiter().GetResult(); // drenar stderr, no nos interesa su contenido
+                return output;
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 }

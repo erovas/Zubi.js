@@ -41,8 +41,6 @@ namespace Zubi.js.PluginManager
             }
         }
 
-        internal Action<string>? OnDisposed;
-
         #endregion
 
         #region Methods

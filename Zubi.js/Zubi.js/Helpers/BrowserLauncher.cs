@@ -238,9 +238,11 @@ namespace Zubi.js.Helpers
 
         public static void Launch(string url, ConfigBrowser config, string profileName = "Default")
         {
-            ProfileMode mode = config.Mode;
+            var mode = config.Mode;
+            var state = config.State;
 
             var (exe, candidate) = FindBrowser(config.Name);
+            //var (exe, candidate) = FindBrowser("Firefox");
 
             if (exe is null || candidate is null)
             {
@@ -252,11 +254,28 @@ namespace Zubi.js.Helpers
             App.Browser = new BrowserData(candidate.Name, candidate.Engine, exe);
 
             // 2. Adaptar argumentos según el motor
-            var psi = BuildProcessStartInfo(exe, candidate.Engine, url, mode, profileName, out string? profileDir);
+            var psi = BuildProcessStartInfo(exe, candidate.Engine, url, config, profileName, out string ? profileDir);
 
+            // 3. Lanzar el proceso
             var proc = Process.Start(psi);
 
-            // 3. Limpieza de perfil temporal solo para motores que la soportan
+            // 4. Redimensionar ventana de WebKit después del lanzamiento (si es necesario)
+            if (candidate.Engine == BrowserEngine.WebKit && config.State == BrowserState.Normal)
+            {
+                var (width, height) = Utils.GetWidthHeight(config.Width, config.Height);
+                if (Platform == Platform.OSX)
+                {
+                    // En macOS, el ejecutable es Safari. Aplicamos el redimensionado.
+                    ResizeSafariWindow(width, height);
+                }
+                else if (Platform == Platform.Linux)
+                {
+                    // En Linux, asumimos que es WebKitGTK (Epiphany).
+                    ResizeEpiphanyWindow(width, height);
+                }
+            }
+
+            // 5. Limpieza de perfil temporal solo para motores que la soportan
             if (mode == ProfileMode.Temporary && proc is not null && profileDir is not null &&
                 (candidate.Engine == BrowserEngine.Chromium || candidate.Engine == BrowserEngine.Gecko))
             {
@@ -264,8 +283,13 @@ namespace Zubi.js.Helpers
             }
         }
 
-        private static ProcessStartInfo BuildProcessStartInfo(string exe, BrowserEngine engine, string url, ProfileMode mode, string profileName, out string? profileDir)
+        private static ProcessStartInfo BuildProcessStartInfo(string exe, BrowserEngine engine, string url, ConfigBrowser config, string profileName, out string? profileDir)
         {
+            var state = config.State;
+            var mode = config.Mode;
+            var theme = config.Theme;
+            var (width, height) = Utils.GetWidthHeight(config.Width, config.Height);
+
             profileDir = null;
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false };
 
@@ -275,6 +299,37 @@ namespace Zubi.js.Helpers
                     psi.ArgumentList.Add($"--app={url}");
                     psi.ArgumentList.Add("--no-first-run");
                     psi.ArgumentList.Add("--no-default-browser-check");
+
+                    if (theme == BrowserTheme.Dark)
+                    {
+                        psi.ArgumentList.Add("--force-dark-mode");
+                        psi.ArgumentList.Add("--enable-features=WebUIDarkMode");
+                        // Para forzar el modo oscuro en el contenido de las páginas web:
+                        psi.ArgumentList.Add("--enable-features=WebContentsForceDark"); // (Opcional)
+                    }
+                    else if(theme == BrowserTheme.Light)
+                    {
+                        psi.ArgumentList.Add("--disable-features=WebUIDarkMode");
+                    }
+
+                    switch (state)
+                    {
+                        case BrowserState.Maximized:
+                            psi.ArgumentList.Add("--start-maximized");
+                            break;
+                        case BrowserState.Fullscreen:
+                            psi.ArgumentList.Add("--start-fullscreen");
+                            // A menudo se necesita maximizar también para que funcione en modo --app
+                            psi.ArgumentList.Add("--start-maximized");
+                            break;
+                        case BrowserState.Kiosk:
+                            psi.ArgumentList.Add("--kiosk");
+                            break;
+                        default:
+                            psi.ArgumentList.Add($"--window-size={width},{height}");
+                            break;
+                    }
+
                     profileDir = ResolveProfileDirectory(mode, profileName);
                     if (profileDir is not null)
                     {
@@ -284,6 +339,23 @@ namespace Zubi.js.Helpers
                     break;
 
                 case BrowserEngine.Gecko:
+                    if(state == BrowserState.Kiosk)
+                    {
+                        psi.ArgumentList.Add("--kiosk");
+                    }
+                    else
+                    {
+                        if(state == BrowserState.Maximized)
+                            (width, height) = Utils.GetPrimaryScreenSize();
+
+                        psi.ArgumentList.Add("-width");
+                        psi.ArgumentList.Add($"{width}");
+                        psi.ArgumentList.Add("-height");
+                        psi.ArgumentList.Add($"{height}");
+                        psi.ArgumentList.Add("--new-instance");
+                    }
+                    // Para 'Fullscreen', no hay flag.El usuario debe presionar F11.
+
                     // Firefox no soporta --app; se abre la URL directamente
                     psi.ArgumentList.Add(url);
                     if (mode != ProfileMode.Shared)
@@ -292,6 +364,29 @@ namespace Zubi.js.Helpers
                         if (profileDir is not null)
                         {
                             Directory.CreateDirectory(profileDir);
+
+                            if(theme != BrowserTheme.System)
+                            {
+                                string userJsPath = Path.Combine(profileDir, "user.js");
+
+                                // Construimos las líneas de preferencias
+                                var prefs = new List<string>();
+                                if (theme == BrowserTheme.Dark)
+                                {
+                                    prefs.Add("user_pref(\"ui.systemUsesDarkTheme\", 1);");
+                                    prefs.Add("user_pref(\"layout.css.prefers-color-scheme.content-override\", 1);");
+                                }
+                                else if (theme == BrowserTheme.Light)
+                                {
+                                    prefs.Add("user_pref(\"ui.systemUsesDarkTheme\", 0);");
+                                    prefs.Add("user_pref(\"layout.css.prefers-color-scheme.content-override\", 0);");
+                                }
+
+                                // Escribimos (sobrescribiendo) el archivo user.js en el perfil.
+                                // En un escenario real, podrías querer hacer un merge si ya existe.
+                                File.WriteAllLines(userJsPath, prefs);
+                            }
+
                             psi.ArgumentList.Add("-profile");
                             psi.ArgumentList.Add(profileDir);
                         }
@@ -308,9 +403,29 @@ namespace Zubi.js.Helpers
                         psi.ArgumentList.Add("-a");
                         psi.ArgumentList.Add(exe);
                         psi.ArgumentList.Add(url);
+
+                        if (state == BrowserState.Fullscreen || state == BrowserState.Kiosk)
+                        {
+                            _ = TrySafariFullscreenAsync(); // Helper existente
+                        }
                     }
                     else
                     {
+                        // WebKitGTK (Epiphany, etc.)
+                        if (state == BrowserState.Fullscreen || state == BrowserState.Kiosk)
+                        {
+                            psi.ArgumentList.Add("--fullscreen");
+                        }
+                        else if (state == BrowserState.Maximized)
+                        {
+                            // El flag exacto depende del navegador (ej. Epiphany usa --maximized)
+                            psi.ArgumentList.Add("--maximized");
+                        }
+                        if (theme == BrowserTheme.Dark)
+                        {
+                            psi.Environment["GTK_THEME"] = "Adwaita:dark";
+                        }
+
                         // Para Epiphany en Linux, se puede pasar la URL directamente
                         psi.ArgumentList.Add(url);
                     }
@@ -322,6 +437,105 @@ namespace Zubi.js.Helpers
             }
 
             return psi;
+        }
+
+        private static async Task TrySafariFullscreenAsync()
+        {
+            try
+            {
+                // Cmd+Ctrl+F es el atajo de fullscreen en Safari (y en la mayoría de apps macOS).
+                await Task.Delay(1500); // dar tiempo a que la ventana exista
+                var psi = new ProcessStartInfo("/usr/bin/osascript")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardError = true
+                };
+                psi.ArgumentList.Add("-e");
+                psi.ArgumentList.Add("tell application \"Safari\" to activate");
+                psi.ArgumentList.Add("-e");
+                psi.ArgumentList.Add("tell application \"System Events\" to keystroke \"f\" using {command down, control down}");
+
+                using var p = Process.Start(psi);
+                if (p is not null) await p.WaitForExitAsync();
+            }
+            catch { /* sin permisos de Automation: se ignora */ }
+        }
+
+        private static void ResizeSafariWindow(int width, int height)
+        {
+            // El formato de 'bounds' es {x, y, ancho, alto}.
+            // Usamos {0, 25, ...} para dejar un pequeño margen en la parte superior (barra de menú).
+            string script = $@"
+                tell application ""Safari""
+                    activate
+                    set bounds of front window to {{0, 25, {width}, {25 + height}}}
+                end tell";
+
+            // Ejecutamos el script en segundo plano, sin bloquear el hilo principal.
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo("/usr/bin/osascript")
+                    {
+                        UseShellExecute = false,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    };
+                    psi.ArgumentList.Add("-e");
+                    psi.ArgumentList.Add(script);
+
+                    using var p = Process.Start(psi);
+                    p?.WaitForExit(3000);
+                }
+                catch { /* Ignorar si falla (permisos, etc.) */ }
+            });
+        }
+
+        private static void ResizeEpiphanyWindow(int width, int height)
+        {
+            // Ejecutamos en segundo plano con un pequeño retraso para dar tiempo a que la ventana se cree.
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1500); // Ajusta este valor si es necesario
+
+                try
+                {
+                    // Intentamos primero con wmctrl
+                    var psi = new ProcessStartInfo("wmctrl")
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    psi.ArgumentList.Add("-x");
+                    psi.ArgumentList.Add("-r");
+                    psi.ArgumentList.Add("epiphany.Epiphany"); // Nombre de clase de la ventana de Epiphany
+                    psi.ArgumentList.Add("-e");
+                    psi.ArgumentList.Add($"0,-1,-1,{width},{height}");
+
+                    using var p = Process.Start(psi);
+                    p?.WaitForExit(1000);
+
+                    // Si wmctrl falla o no está, podríamos intentar con xdotool como fallback.
+                }
+                catch
+                {
+                    // Fallback opcional con xdotool
+                    try
+                    {
+                        var psiXdo = new ProcessStartInfo("xdotool")
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        // 'search --class' encuentra la ventana de Epiphany
+                        // 'windowsize' la redimensiona
+                        // Nota: Se necesitaría el ID de la ventana, lo cual complica el comando.
+                        // Por simplicidad, se deja wmctrl como opción principal.
+                    }
+                    catch { /* Ignorar */ }
+                }
+            });
         }
 
         // --- Búsqueda del navegador ---

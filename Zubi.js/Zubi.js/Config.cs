@@ -31,5 +31,9 @@ namespace Zubi.js
     {
         public string Name { get; init; } = string.Empty;
         public ProfileMode Mode { get; init; } = ProfileMode.Named;
+        public BrowserState State { get; init; } = BrowserState.Normal;
+        public BrowserTheme Theme { get; init; } = BrowserTheme.System;
+        public int Width { get; init; } = -1;
+        public int Height { get; init; } = -1;
     }
 }
