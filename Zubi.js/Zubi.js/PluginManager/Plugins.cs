@@ -7,6 +7,9 @@ namespace Zubi.js.PluginManager
 {
     internal sealed class Plugins
     {
+        private readonly object _DisposeLock = new();
+        private readonly ConcurrentDictionary<string, List<IDisposable>> _EventSubscriptions = new();
+
         /// <summary>
         /// { "UID", Instnace }
         /// </summary>
@@ -123,11 +126,22 @@ namespace Zubi.js.PluginManager
 
             add.Invoke(instance, new object[] { bridge });
 
-            return new EventSubscription(() =>
+            var subscription = new EventSubscription(() =>
             {
                 try { remove?.Invoke(instance, new object[] { bridge }); } 
                 catch { }
             });
+
+            _EventSubscriptions.AddOrUpdate(
+                pluginUid, _ => new List<IDisposable> { subscription },
+                (_, list) => 
+                { 
+                    list.Add(subscription); 
+                    return list; 
+                }
+            );
+
+            return subscription;
         }
 
         public object? ConvertValue(object? obj)
@@ -151,6 +165,40 @@ namespace Zubi.js.PluginManager
             }
 
             return obj;
+        }
+
+        public void DisposeAll()
+        {
+            lock (_DisposeLock)
+            {
+                foreach (var kvp in _Instances)
+                {
+                    // Dispose de los eventos de los plugins registrados desde JS
+                    if (_EventSubscriptions.TryRemove(kvp.Key, out var subs))
+                        foreach (var sub in subs)
+                            try { sub.Dispose(); } 
+                            catch { }
+
+                    // Dispose de las instancias de los plugins
+                    try { kvp.Value.Dispose(); } 
+                    catch { }
+                }
+
+                _Instances.Clear();
+                _Types.Clear();
+
+                foreach (var val in _Imported.Values)
+                    val.Unload();
+
+                _Imported.Clear();
+            }
+
+            _ = Task.Run(() =>
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            });
         }
 
         #endregion

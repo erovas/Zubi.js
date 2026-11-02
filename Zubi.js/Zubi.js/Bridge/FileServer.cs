@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text;
 using Zubi.js.Helpers;
+using Zubi.js.PluginManager;
 using Zubi.js.Scripts;
 
 namespace Zubi.js.Bridge
@@ -13,14 +14,17 @@ namespace Zubi.js.Bridge
         private readonly HttpListener _listener = new();
         private readonly string _rootPath;
         private readonly SessionStore _session;
+        private readonly Plugins _plugins;
+        private int _indexRequestCount;
 
         public Func<HttpListenerContext, Task>? WebSocketHandler { get; set; }
 
-        public FileServer(string baseUrl, string rootPath, SessionStore session)
+        public FileServer(string baseUrl, string rootPath, SessionStore session, Plugins plugins)
         {
             _listener.Prefixes.Add(baseUrl);
             _rootPath = Path.GetFullPath(rootPath);
             _session = session;
+            _plugins = plugins;
         }
 
         public void Start()
@@ -107,6 +111,10 @@ namespace Zubi.js.Bridge
 
                 if (req.HttpMethod == "GET")
                 {
+                    // Solo limpia a partir de la segunda petición (recarga real)
+                    if (Interlocked.Increment(ref _indexRequestCount) > 1)
+                        _plugins.DisposeAll();
+                    
                     var tabToken = _session.ConsumeMasterToken(req.QueryString["token"]);
                     var meta = tabToken is not null ? $"<meta name=\"bridge-token\" content=\"{tabToken}\">" : string.Empty;
                     var script = "<script>";

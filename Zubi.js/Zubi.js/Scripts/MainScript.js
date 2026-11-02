@@ -18,10 +18,7 @@
         TOKEN = sessionStorage.getItem('bridge_token');
 
     if (!TOKEN) {
-        console.error(`[${NAME}] Sin token. La app no se autenticará.`);
-        window.native = new Proxy({}, {
-            get: () => () => Promise.reject(new Error('Bridge not authenticated')),
-        });
+        console.error(`[${NAME}] without token.`);
         return;
     }
 
