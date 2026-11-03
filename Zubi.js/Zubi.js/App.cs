@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Zubi.js
@@ -35,6 +36,9 @@ namespace Zubi.js
         /// </summary>
         public static BrowserData Browser { get; internal set; }
 
+
+        internal static Process? Handler;
+
         static App()
         {
             BaseDirectory = AppContext.BaseDirectory;
@@ -52,6 +56,31 @@ namespace Zubi.js
             Platform = platform;
             IsDebugging = System.Diagnostics.Debugger.IsAttached;
             Browser = new BrowserData(BrowserEngine.Unknown.ToString(), BrowserEngine.Unknown, string.Empty);
+        }
+
+        public static void Close()
+        {
+            var proc = Handler;
+            if (proc is null) 
+                return;
+
+            try
+            {
+                if (!proc.HasExited)
+                {
+                    // Cierre forzado pero limpio: mata el árbol completo
+                    proc.Kill(entireProcessTree: true);
+                    proc.WaitForExit(3000);
+                }
+            }
+            catch
+            {
+                // Si falla (permisos, proceso ya terminado, etc.), se ignora
+            }
+            finally
+            {
+                Handler = null;
+            }
         }
     }
 }

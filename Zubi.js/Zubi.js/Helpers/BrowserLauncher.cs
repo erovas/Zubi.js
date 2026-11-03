@@ -258,6 +258,7 @@ namespace Zubi.js.Helpers
 
             // 3. Lanzar el proceso
             var proc = Process.Start(psi);
+            App.Handler = proc;
 
             // 4. Redimensionar ventana de WebKit después del lanzamiento (si es necesario)
             if (candidate.Engine == BrowserEngine.WebKit && config.State == BrowserState.Normal)
