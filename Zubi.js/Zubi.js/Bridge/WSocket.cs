@@ -180,7 +180,7 @@ namespace Zubi.js.Bridge
                 object? result;
 
                 if (uid.Equals(Utils.PLUGINS, StringComparison.OrdinalIgnoreCase))
-                    result = Utils.Invoke(_plugins, Utils.PLUGINS, method, args, ct);
+                    result = _plugins.SelfInvoke(method, args, ct);
                 else
                     result = _plugins.Invoke(uid, method, args, ct);
 

@@ -414,18 +414,17 @@
                             Bridge.DispatchInstanceEvent(uid, event.type, event.detail);
                             return true;
                         };
-                }
-
-                // Dispose: ejecuta en C# y limpia en JS (eventos + Instances)
-                if (method === 'Dispose') {
-                    return async (...args) => {
-                        try {
-                            return await Bridge.Call(uid, method, args);
-                        } finally {
-                            Bridge.ClearInstanceEvents(uid);
-                            PluginInstances.delete(uid);
-                        }
-                    };
+                    case 'Dispose':
+                        return async (...args) => {
+                            try {
+                                return await Bridge.Call(uid, method, args);
+                            } finally {
+                                Bridge.ClearInstanceEvents(uid);
+                                PluginInstances.delete(uid);
+                            }
+                        };
+                    case 'toJSON':
+                        return () => ({ [UID]: uid });
                 }
 
                 const callable = (...args) => Bridge.Call(uid, method, args);

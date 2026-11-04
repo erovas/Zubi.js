@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Text.Json;
 using Zubi.js.Helpers;
 
 namespace Zubi.js.PluginManager
@@ -100,11 +101,18 @@ namespace Zubi.js.PluginManager
             this._Imported.TryRemove(assemblyName, out _);
         }
 
+        public object? SelfInvoke(string method, object?[] args, CancellationToken ct)
+        {
+            JSConvertArgs(args);
+            return Utils.Invoke(this, Utils.PLUGINS, method, args, ct);
+        }
+
         public object? Invoke(string uid, string methodName, object?[] args, CancellationToken ct)
         {
             if (!_Instances.TryGetValue(uid, out Plugin? plugin))
                 throw new ObjectDisposedException("Instance disposed");
-            
+
+            JSConvertArgs(args);
             return Utils.Invoke(plugin, plugin.Name, methodName, args, ct);
         }
 
@@ -202,6 +210,16 @@ namespace Zubi.js.PluginManager
         #endregion
 
         #region Helpers
+
+        private void JSConvertArgs(object?[] args)
+        {
+            for (int i = 0; i < args.Length; i++)
+                if (args[i] is JsonElement el && el.ValueKind == JsonValueKind.Object && el.TryGetProperty("___UID___", out JsonElement uidProp))
+                    if(_Instances.TryGetValue(uidProp.ToString(), out var plugin))
+                        args[i] = plugin;
+                    else
+                        args[i] = null;
+        }
 
         private AssemblyLoadResult LoadAux(string assemblyPath)
         {
