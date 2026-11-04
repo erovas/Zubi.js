@@ -103,7 +103,6 @@ namespace Zubi.js.PluginManager
 
         public object? SelfInvoke(string method, object?[] args, CancellationToken ct)
         {
-            JSConvertArgs(args);
             return Utils.Invoke(this, Utils.PLUGINS, method, args, ct);
         }
 
@@ -275,6 +274,7 @@ namespace Zubi.js.PluginManager
 
         private Plugin CreateInstance(Type type, string pluginName, object[] args)
         {
+            JSConvertArgs(args);
             object? pluginInstance = Activator.CreateInstance(type, args);
 
             if (pluginInstance == null)
