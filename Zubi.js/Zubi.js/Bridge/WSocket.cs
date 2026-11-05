@@ -10,6 +10,8 @@ namespace Zubi.js.Bridge
 {
     internal class WSocket
     {
+        private static readonly ConcurrentDictionary<Guid, WebSocket> ConnectedSockets = new();
+
         private readonly SessionStore _session;
         private readonly Plugins _plugins;
         private readonly ConnectionTracker _tracker;
@@ -21,6 +23,31 @@ namespace Zubi.js.Bridge
             _plugins = plugins;
             _tracker = tracker;
             _allowedOrigins = new HashSet<string>(allowedOrigins, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Nuevo método estático para broadcast de recarga
+        public static async Task BroadcastReloadAsync()
+        {
+            var payload = Utils.JsonSerialize(new { LiveReload = true });
+            var bytes = Encoding.UTF8.GetBytes(payload);
+
+            foreach (var kvp in ConnectedSockets)
+            {
+                var ws = kvp.Value;
+                if (ws.State != WebSocketState.Open) continue;
+                try
+                {
+                    await ws.SendAsync(
+                        new ArraySegment<byte>(bytes),
+                        WebSocketMessageType.Text,
+                        true,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                    // Si falla una conexión, la ignoramos (se limpiará en el finally)
+                }
+            }
         }
 
         public async Task HandleAsync(HttpListenerContext ctx)
@@ -46,10 +73,16 @@ namespace Zubi.js.Bridge
 
             var wsCtx = await ctx.AcceptWebSocketAsync(null);
             var ws = wsCtx.WebSocket;
+            var socketId = Guid.NewGuid();
+            ConnectedSockets[socketId] = ws;
 
             _tracker.OnConnected();
             try { await ServeAsync(ws); }
-            finally { _tracker.OnDisconnected(); }
+            finally 
+            {
+                ConnectedSockets.TryRemove(socketId, out _);
+                _tracker.OnDisconnected(); 
+            }
         }
 
         private async Task ServeAsync(WebSocket ws)

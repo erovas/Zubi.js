@@ -16,8 +16,8 @@ namespace Zubi.js
         private static async Task<int> MainAsync(string[] args)
         {
             var config = Config.Load(Utils.GetFullDirectory("config.json", false));
-            var port = config.Port > 0 ? config.Port : Utils.FindFreePort();
-            var localOrigin = $"http://127.0.0.1:{port}";
+            var port = Utils.FindFreePort(config.Browser.DebugPort);
+            var localOrigin = Utils.GetUrlPort(port);
             var srcPath = App.BaseDirectory;
             var plugins = new Plugins();
             var session = new SessionStore();
@@ -37,6 +37,15 @@ namespace Zubi.js
                 new[] { localOrigin }.Concat(config.AllowedOrigins).ToArray());
 
             server.WebSocketHandler = bridge.HandleAsync;
+
+            LiveReloadWatcher? liveReload = null;
+
+            if (config.Browser.LiveReload)
+            {
+                liveReload = new LiveReloadWatcher(App.BaseDirectory);
+                Console.WriteLine("LiveReload activado.");
+            }
+
             server.Start();
 
             var url = $"{localOrigin}/?token={session.MasterToken}";
@@ -45,6 +54,8 @@ namespace Zubi.js
             Console.WriteLine($"Abriendo:    {url}");
 
             BrowserLauncher.Launch(url, config.Browser);
+
+            Console.WriteLine("Debug port ready");
 
             Console.CancelKeyPress += delegate (object? sender, ConsoleCancelEventArgs e)
             {
@@ -55,6 +66,7 @@ namespace Zubi.js
             await shutdownTcs.Task;
 
             Console.WriteLine("Cerrando…");
+            liveReload?.Dispose();
             server.Stop();
             return 0;
         }

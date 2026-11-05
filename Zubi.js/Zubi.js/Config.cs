@@ -5,7 +5,6 @@ namespace Zubi.js
 {
     internal sealed class Config
     {
-        public int Port { get; init; }
         public string[] AllowedOrigins { get; init; } = [];
         public int ShutdownSeconds { get; init; } = 3;
         public ConfigBrowser Browser { get; init; } = new();
@@ -35,5 +34,7 @@ namespace Zubi.js
         public BrowserTheme Theme { get; init; } = BrowserTheme.System;
         public int Width { get; init; } = -1;
         public int Height { get; init; } = -1;
+        public int DebugPort { get; init; } = 0;
+        public bool LiveReload { get; init; } = false;
     }
 }

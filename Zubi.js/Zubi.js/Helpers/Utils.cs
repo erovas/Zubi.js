@@ -74,6 +74,11 @@ namespace Zubi.js.Helpers
             return JsonSerializer.Deserialize(json, target, JsonWriteStrictOptions);
         }
 
+        public static string GetUrlPort(int port)
+        {
+            return $"http://127.0.0.1:{port}";
+        }
+
         private sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
         {
             public override byte[] Read(ref Utf8JsonReader reader, Type _, JsonSerializerOptions __)

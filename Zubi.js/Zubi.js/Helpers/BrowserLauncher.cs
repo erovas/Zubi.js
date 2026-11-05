@@ -301,6 +301,9 @@ namespace Zubi.js.Helpers
                     psi.ArgumentList.Add("--no-first-run");
                     psi.ArgumentList.Add("--no-default-browser-check");
 
+                    if(config.DebugPort > 0)
+                        psi.ArgumentList.Add($"--remote-debugging-port={config.DebugPort}");
+
                     if (theme == BrowserTheme.Dark)
                     {
                         psi.ArgumentList.Add("--force-dark-mode");
@@ -340,6 +343,13 @@ namespace Zubi.js.Helpers
                     break;
 
                 case BrowserEngine.Gecko:
+
+                    if(config.DebugPort > 0)
+                    {
+                        psi.ArgumentList.Add("--start-debugger-server");
+                        psi.ArgumentList.Add($"{config.DebugPort}");
+                    }
+
                     if(state == BrowserState.Kiosk)
                     {
                         psi.ArgumentList.Add("--kiosk");
@@ -353,8 +363,10 @@ namespace Zubi.js.Helpers
                         psi.ArgumentList.Add($"{width}");
                         psi.ArgumentList.Add("-height");
                         psi.ArgumentList.Add($"{height}");
-                        psi.ArgumentList.Add("--new-instance");
                     }
+
+                    // Evitar reutilizar instancia ya abierta
+                    psi.ArgumentList.Add("--new-instance");
                     // Para 'Fullscreen', no hay flag.El usuario debe presionar F11.
 
                     // Firefox no soporta --app; se abre la URL directamente
@@ -412,6 +424,9 @@ namespace Zubi.js.Helpers
                     }
                     else
                     {
+                        if(config.DebugPort > 0)
+                            psi.Environment["WEBKIT_INSPECTOR_SERVER"] = Utils.GetUrlPort(config.DebugPort);
+                        
                         // WebKitGTK (Epiphany, etc.)
                         if (state == BrowserState.Fullscreen || state == BrowserState.Kiosk)
                         {

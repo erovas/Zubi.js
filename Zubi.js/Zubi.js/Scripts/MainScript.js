@@ -102,6 +102,9 @@
             try { msg = JSON.parse(event.data); }
             catch { return; }
 
+            if(msg.LiveReload)
+                location.reload();
+
             // Disparo de evento de C# para JS
             if (msg.event) {
                 if (msg.uid)
