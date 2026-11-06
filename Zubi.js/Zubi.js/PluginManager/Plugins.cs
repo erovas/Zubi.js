@@ -51,6 +51,15 @@ namespace Zubi.js.PluginManager
             return _Instances[UID];
         }
 
+        public TypeDescription GetDescription(string pluginName)
+        {
+            _Types.TryGetValue(pluginName, out var type);
+            if (type is null)
+                throw new InvalidOperationException($"Plugin [{pluginName}] no exists");
+
+            return Utils.GetTypeDescription(type);
+        }
+
         public AssemblyLoadResult Load(string pluginPath)
         {
             return LoadAux(pluginPath);

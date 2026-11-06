@@ -246,12 +246,12 @@ namespace Zubi.js.Helpers
 
             if (exe is null || candidate is null)
             {
-                LaunchDefaultBrowser(url);
+                App.Handler = LaunchDefaultBrowser(url);
                 return;
             }
 
             // 1. Registrar el navegador lanzado
-            App.Browser = new BrowserData(candidate.Name, candidate.Engine, exe);
+            App.Browser = new BrowserData(candidate.Name, candidate.Engine, exe, url, config.DebugPort);
 
             // 2. Adaptar argumentos según el motor
             var psi = BuildProcessStartInfo(exe, candidate.Engine, url, config, profileName, out string ? profileDir);
@@ -635,7 +635,7 @@ namespace Zubi.js.Helpers
         }
 
         // --- Lanzamiento del navegador por defecto ---
-        private static void LaunchDefaultBrowser(string url)
+        private static Process? LaunchDefaultBrowser(string url)
         {
             ProcessStartInfo psi;
 
@@ -653,7 +653,7 @@ namespace Zubi.js.Helpers
                 psi.ArgumentList.Add(url);
             }
 
-            Process.Start(psi);
+            return Process.Start(psi);
         }
 
     }

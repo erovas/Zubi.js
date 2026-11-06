@@ -55,7 +55,7 @@ namespace Zubi.js
 
             Platform = platform;
             IsDebugging = System.Diagnostics.Debugger.IsAttached;
-            Browser = new BrowserData(BrowserEngine.Unknown.ToString(), BrowserEngine.Unknown, string.Empty);
+            Browser = new BrowserData(BrowserEngine.Unknown.ToString(), BrowserEngine.Unknown);
         }
 
         public static void Close()

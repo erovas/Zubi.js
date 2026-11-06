@@ -8,11 +8,17 @@
 
         public string Path { get; }
 
-        internal BrowserData(string name, BrowserEngine engine, string path)
+        public string Href { get; }
+
+        public int DebugPort { get; }
+
+        internal BrowserData(string name, BrowserEngine engine, string path = "", string href = "", int debugPort = 0)
         {
             Name = name;
             Engine = engine;
             Path = path;
+            Href = href;
+            DebugPort = debugPort;
         }
     }
 }

@@ -3,6 +3,7 @@
 
     const NAME = 'Zubi.js';
     const UID = '___UID___';
+    const PLUGINS = 'Plugins';
 
     // ---- Token ----
     const meta = document.querySelector('meta[name="bridge-token"]');
@@ -440,28 +441,31 @@
 
     const PluginsApi = {
         get Loaded(){
-            return Bridge.Call('Plugins', 'Loaded', []);
+            return Bridge.Call(PLUGINS, 'Loaded', []);
         },
         async GetInstance(uid) {
             if(PluginInstances.has(uid))
                 return PluginInstances.get(uid);
 
-            await Bridge.Call('Plugins', 'GetInstance', [uid]);
+            await Bridge.Call(PLUGINS, 'GetInstance', [uid]);
             const instance = MakePluginProxy(uid);
             PluginInstances.set(uid, instance);
             return instance;
         },
+        GetDescription(pluginName){
+            return Bridge.Call(PLUGINS, 'GetDescription', [pluginName]);
+        },
         Load(pluginPath){
-            return Bridge.Call('Plugins', 'Load', [pluginPath]);
+            return Bridge.Call(PLUGINS, 'Load', [pluginPath]);
         },
         LoadFrom(folderPath = null){
-            return Bridge.Call('Plugins', 'LoadFrom', [folderPath]);
+            return Bridge.Call(PLUGINS, 'LoadFrom', [folderPath]);
         },
         NewInstance(pluginName, ...args){
-           return Bridge.Call('Plugins', 'NewInstance', [pluginName, args]);
+           return Bridge.Call(PLUGINS, 'NewInstance', [pluginName, args]);
         },
         Unload(pluginName){
-            return Bridge.Call('Plugins', 'Unload', [pluginName]);
+            return Bridge.Call(PLUGINS, 'Unload', [pluginName]);
         },
         Navigate(url){
             const u = new URL(url);

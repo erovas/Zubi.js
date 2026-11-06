@@ -79,6 +79,142 @@ namespace Zubi.js.Helpers
             return $"http://127.0.0.1:{port}";
         }
 
+        public static TypeDescription GetTypeDescription(object obj)
+        {
+            return GetTypeDescription(obj.GetType());
+        }
+
+        public static TypeDescription GetTypeDescription(Type type)
+        {
+            var flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static;
+
+            return new TypeDescription
+            {
+                Name = type.Name,
+                FullName = type.FullName ?? type.Name,
+                Namespace = type.Namespace ?? string.Empty,
+                IsAbstract = type.IsAbstract,
+                IsSealed = type.IsSealed,
+                BaseType = type.BaseType?.Name ?? string.Empty,
+                Interfaces = type.GetInterfaces().Select(i => i.Name).ToList(),
+
+                Properties = type.GetProperties(flags)
+                    .Where(p => p.GetIndexParameters().Length == 0) // ignorar indexers
+                    .Select(p => new PropertyDescription
+                    {
+                        Name = p.Name,
+                        Type = GetFriendlyTypeName(p.PropertyType),
+                        TypeFullName = p.PropertyType.FullName ?? string.Empty,
+                        CanRead = p.CanRead,
+                        CanWrite = p.CanWrite,
+                        Accessors = (p.CanRead, p.CanWrite) switch
+                        {
+                            (true, true) => "get;set;",
+                            (true, false) => "get;",
+                            (false, true) => "set;",
+                            _ => ""
+                        },
+                        IsStatic = (p.GetMethod ?? p.SetMethod)?.IsStatic ?? false,
+                        IsVirtual = (p.GetMethod ?? p.SetMethod)?.IsVirtual ?? false,
+                    })
+                    .ToList(),
+
+                Methods = type.GetMethods(flags)
+                    .Where(m => !m.IsSpecialName)                       // excluye get_/set_/add_
+                    .Where(m => m.DeclaringType != typeof(object))      // excluye Equals/ToString/etc.
+                    .Select(m =>
+                    {
+                        var (ret, isAsync) = GetReturnTypeInfo(m.ReturnType);
+                        return new MethodDescription
+                        {
+                            Name = m.Name,
+                            ReturnType = ret,
+                            ReturnsVoid = m.ReturnType == typeof(void),
+                            IsStatic = m.IsStatic,
+                            IsAbstract = m.IsAbstract,
+                            IsVirtual = m.IsVirtual,
+                            IsAsync = isAsync,
+                            Parameters = m.GetParameters().Select(BuildParameter).ToList(),
+                        };
+                    })
+                    .ToList(),
+
+                Constructors = type.GetConstructors(flags)
+                    .Select(c => new ConstructorDescription
+                    {
+                        Parameters = c.GetParameters().Select(BuildParameter).ToList(),
+                    })
+                    .ToList(),
+            };
+        }
+
+        private static ParameterDescription BuildParameter(ParameterInfo p) => new()
+        {
+            Name = p.Name ?? string.Empty,
+            Type = GetFriendlyTypeName(p.ParameterType.IsByRef
+                            ? p.ParameterType.GetElementType()!
+                            : p.ParameterType)
+                        + (p.IsOut ? " (out)" : p.ParameterType.IsByRef ? " (ref)" : ""),
+            IsOptional = p.IsOptional,
+            DefaultValue = p.HasDefaultValue ? p.DefaultValue?.ToString() ?? "null" : "null",
+            IsOut = p.IsOut,
+            IsRef = p.ParameterType.IsByRef && !p.IsOut,
+        };
+
+        private static (string typeName, bool isAsync) GetReturnTypeInfo(Type t)
+        {
+            if (t == typeof(Task) || t == typeof(ValueTask))
+                return ("void", true);
+
+            if (t.IsGenericType)
+            {
+                var def = t.GetGenericTypeDefinition();
+                if (def == typeof(Task<>) || def == typeof(ValueTask<>))
+                    return (GetFriendlyTypeName(t.GetGenericArguments()[0]), true);
+            }
+            return (GetFriendlyTypeName(t), false);
+        }
+
+        /// <summary>
+        /// Nombre "amigable" del tipo (string, int, List&lt;Persona&gt;, string?, etc.)
+        /// </summary>
+        private static string GetFriendlyTypeName(Type type)
+        {
+            if (type is null) return "null";
+
+            var underlying = Nullable.GetUnderlyingType(type);
+            if (underlying != null)
+                return GetFriendlyTypeName(underlying) + "?";
+
+            if (type.IsArray)
+                return GetFriendlyTypeName(type.GetElementType()!) + "[]";
+
+            if (type.IsGenericType)
+            {
+                var name = type.Name;
+                var tick = name.IndexOf('`');
+                if (tick >= 0) name = name[..tick];
+                var args = type.GetGenericArguments().Select(GetFriendlyTypeName);
+                return $"{name}<{string.Join(", ", args)}>";
+            }
+
+            return type.Name switch
+            {
+                "String" => "string",
+                "Int32" => "int",
+                "Int64" => "long",
+                "Int16" => "short",
+                "Boolean" => "bool",
+                "Double" => "double",
+                "Single" => "float",
+                "Decimal" => "decimal",
+                "Object" => "object",
+                "Byte" => "byte",
+                "Char" => "char",
+                _ => type.Name
+            };
+        }
+
         private sealed class Base64ByteArrayConverter : JsonConverter<byte[]>
         {
             public override byte[] Read(ref Utf8JsonReader reader, Type _, JsonSerializerOptions __)
