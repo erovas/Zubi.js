@@ -346,7 +346,7 @@ namespace Zubi.js.Helpers
 
                     if(config.DebugPort > 0)
                     {
-                        psi.ArgumentList.Add("--start-debugger-server");
+                        psi.ArgumentList.Add("--remote-debugging-port");
                         psi.ArgumentList.Add($"{config.DebugPort}");
                     }
 

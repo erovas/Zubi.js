@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Plugins/">
+    <Project Path="CDP/CDP.csproj" Id="99552ac4-1fb8-4877-ad62-2663ff463434" />
     <Project Path="Essentials/Essentials.csproj" Id="b0edb68b-84e2-40e6-9c79-12c5119199c2" />
   </Folder>
   <Project Path="Zubi.js/Zubi.js.csproj" />
