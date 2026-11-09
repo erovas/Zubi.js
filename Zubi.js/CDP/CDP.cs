@@ -9,6 +9,7 @@ namespace CDP
     public class CDP : Plugin
     {
         private long _nextId;
+        private int _windowId;
         private string? _targetId;
         private readonly Uri _Uri;
         private string? _sessionId;
@@ -270,8 +271,7 @@ namespace CDP
             await _ready.Task;
             TabNoDetected();
 
-            var winResp = await SendAndWaitAsync("Browser.getWindowForTarget", new { targetId = _targetId });
-            var windowId = winResp.GetProperty("result").GetProperty("windowId").GetInt32();
+            var windowId = await GetWindowId();
 
             // Nota: Enviamos "windowState: normal" junto con la geometría. 
             // En este caso, CDP sí lo permite porque "normal" es la base para la geometría.
@@ -286,6 +286,46 @@ namespace CDP
                     height
                 }
             });
+        }
+
+        /// <summary>
+        /// Zubi.CDP.GetWindowGeometry()
+        /// Devuelve la posición y el tamaño actual de la ventana.
+        /// </summary>
+        public async Task<WindowGeometry> GetWindowGeometry()
+        {
+            await _ready.Task;
+            TabNoDetected();
+
+            var windowId = await GetWindowId();
+
+            // 2. Consultamos los límites actuales
+            var boundsResp = await SendAndWaitAsync("Browser.getWindowBounds", new { windowId });
+
+            if (!boundsResp.TryGetProperty("result", out var boundsResult) || !boundsResult.TryGetProperty("bounds", out var boundsEl))
+                throw new InvalidOperationException("The window boundaries could not be obtained..");
+            
+            var geo = new WindowGeometry();
+
+            // 3. Extraemos los valores con TryGetProperty por seguridad
+            if (boundsEl.TryGetProperty("windowState", out var stateProp))
+                geo.WindowState = stateProp.GetString() ?? "normal";
+
+            // Nota: Si la ventana está minimizada, algunos sistemas operativos 
+            // no devuelven left/top/width/height. Usamos TryGetProperty para evitar crashes.
+            if (boundsEl.TryGetProperty("left", out var leftProp))
+                geo.Left = leftProp.GetInt32();
+
+            if (boundsEl.TryGetProperty("top", out var topProp))
+                geo.Top = topProp.GetInt32();
+
+            if (boundsEl.TryGetProperty("width", out var widthProp))
+                geo.Width = widthProp.GetInt32();
+
+            if (boundsEl.TryGetProperty("height", out var heightProp))
+                geo.Height = heightProp.GetInt32();
+
+            return geo;
         }
 
         protected override void Dispose(bool disposing)
@@ -421,6 +461,21 @@ namespace CDP
         {
             if (string.IsNullOrEmpty(_targetId))
                 throw new InvalidOperationException("The tab's targetId has not been detected.");
+        }
+
+        private async Task<int> GetWindowId()
+        {
+            if (_windowId == 0)
+            {
+                var winResp = await SendAndWaitAsync("Browser.getWindowForTarget", new { targetId = _targetId });
+
+                if (!winResp.TryGetProperty("result", out var result) || !result.TryGetProperty("windowId", out var idProp))
+                    throw new InvalidOperationException("Could not obtain the WindowId for the window.");
+                
+                _windowId = idProp.GetInt32();
+            }
+
+            return _windowId;
         }
 
         private static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
