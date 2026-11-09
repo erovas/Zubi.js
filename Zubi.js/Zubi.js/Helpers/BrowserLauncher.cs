@@ -328,6 +328,7 @@ namespace Zubi.js.Helpers
                             break;
                         case BrowserState.Kiosk:
                             psi.ArgumentList.Add("--kiosk");
+                            psi.ArgumentList.Add("--force-devtools-available");
                             break;
                         default:
                             psi.ArgumentList.Add($"--window-size={width},{height}");

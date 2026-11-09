@@ -9,11 +9,15 @@ namespace CDP
     public class CDP : Plugin
     {
         private long _nextId;
+        private string? _targetId;
         private readonly Uri _Uri;
-        private ClientWebSocket? _ws;
+        private string? _sessionId;
+        private ClientWebSocket? _browserWs;
         private readonly TaskCompletionSource _ready;
         private readonly SemaphoreSlim _sendLock = new(1, 1);
         private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending;
+
+        #region Events
 
         public event EventHandler<object>? ConsoleMessage;
         public event EventHandler<object>? ExceptionThrown;
@@ -21,6 +25,20 @@ namespace CDP
         public event EventHandler<object>? NetworkRequest;
         public event EventHandler<object>? NetworkResponse;
         public event EventHandler? PageLoad;
+
+        #endregion
+
+        #region Properties
+
+        /// <summary>
+        /// "normal", "minimized", "maximized", "fullscreen"
+        /// </summary>
+        public Task<string> WindowState
+        {
+            get => GetWindowState();
+        }
+
+        #endregion
 
         public CDP() 
         {
@@ -41,30 +59,46 @@ namespace CDP
         {
             try
             {
-                // 1) Descubrir la URL del WS a partir de las primitivas de App.
-                var wsUrl = await GetWebSocketUrlAsync(_Uri) ?? throw new InvalidOperationException($"Could not discover the debug WebSocket for '{App.Browser.Name}'.");
+                // 1. Descubrir el WebSocket del navegador
+                var browserWsUrl = await DiscoverBrowserWebSocketAsync(_Uri);
 
-                // 2) Abrir la conexión.
-                var ws = new ClientWebSocket();
+                if (browserWsUrl == null)
+                    throw new InvalidOperationException($"Could not discover the debug WebSocket for '{App.Browser.Name}'.");
+
                 try
                 {
-                    await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
+                    _browserWs = new ClientWebSocket();
+                    await _browserWs.ConnectAsync(new Uri(browserWsUrl), CancellationToken.None);
                 }
                 catch
                 {
-                    ws.Dispose();
-                    throw new InvalidOperationException($"Could not connect to the debug WebSocket at '{wsUrl}'.");
+                    _browserWs?.Dispose();
+                    throw new InvalidOperationException($"Could not connect to the debug WebSocket at '{browserWsUrl}'.");
                 }
 
-                _ws = ws;
-                _ = ListenAsync();
+                _ = ListenAsync(_browserWs); // Escuchamos todo por aquí
+
+                // 2. Descubrir el targetId de la pestaña (usando /json, como ya hacías)
+                (var pageWsUrl, _targetId) = await GetWebSocketUrlAsync(_Uri);
+
+                if (string.IsNullOrEmpty(_targetId)) 
+                    throw new InvalidOperationException("The targetId was not found.");
+
+                // 3. CREAR LA SESIÓN PLANA (Attach)
+                var attachResp = await SendAndWaitAsync("Target.attachToTarget", new
+                {
+                    targetId = _targetId,
+                    flatten = true // CLAVE: Usa sesiones planas
+                });
+
+                _sessionId = attachResp.GetProperty("result").GetProperty("sessionId").GetString();
 
                 // Habilitar dominios fundamentales
-                await SendAndWaitAsync("Runtime.enable", new { });
-                await SendAndWaitAsync("Page.enable", new { });
-                await SendAndWaitAsync("DOM.enable", new { });
-                await SendAndWaitAsync("Network.enable", new { });
-                await SendAndWaitAsync("Log.enable", new { });
+                await SendAndWaitAsync("Runtime.enable", new { }, _sessionId);
+                await SendAndWaitAsync("Page.enable", new { }, _sessionId);
+                await SendAndWaitAsync("DOM.enable", new { }, _sessionId);
+                await SendAndWaitAsync("Network.enable", new { }, _sessionId);
+                await SendAndWaitAsync("Log.enable", new { }, _sessionId);
 
                 _ready.TrySetResult();
             }
@@ -83,7 +117,7 @@ namespace CDP
                 expression,
                 generatePreview = true,
                 returnByValue = false
-            });
+            }, _sessionId);
             return resp.GetProperty("result").GetProperty("result");
         }
 
@@ -91,7 +125,7 @@ namespace CDP
         public async Task<object?> GetProperties(string expression)
         {
             await _ready.Task;
-            var evalResp = await SendAndWaitAsync("Runtime.evaluate", new { expression, generatePreview = true });
+            var evalResp = await SendAndWaitAsync("Runtime.evaluate", new { expression, generatePreview = true }, _sessionId);
             var result = evalResp.GetProperty("result").GetProperty("result");
 
             if (!result.TryGetProperty("objectId", out var oid)) 
@@ -102,7 +136,7 @@ namespace CDP
                 objectId = oid.GetString(),
                 ownProperties = true,
                 generatePreview = true
-            });
+            }, _sessionId);
             return propsResp.GetProperty("result");
         }
 
@@ -110,14 +144,14 @@ namespace CDP
         public async Task Navigate(string url)
         {
             await _ready.Task;
-            await SendAndWaitAsync("Page.navigate", new { url });
+            await SendAndWaitAsync("Page.navigate", new { url }, _sessionId);
         }
 
         /// <summary>Zubi.CDP.Reload()</summary>
         public async Task Reload()
         {
             await _ready.Task;
-            await SendAndWaitAsync("Page.reload", new { ignoreCache = false });
+            await SendAndWaitAsync("Page.reload", new { ignoreCache = false }, _sessionId);
         }
 
         /// <summary>Zubi.CDP.TakeScreenshot("jpeg", 80) - Devuelve un string en Base64</summary>
@@ -150,15 +184,15 @@ namespace CDP
         public async Task<string?> QuerySelector(string selector)
         {
             await _ready.Task;
-            var docResp = await SendAndWaitAsync("DOM.getDocument", new { depth = 1 });
+            var docResp = await SendAndWaitAsync("DOM.getDocument", new { depth = 1 }, _sessionId);
             var rootId = docResp.GetProperty("result").GetProperty("root").GetProperty("nodeId").GetInt32();
 
-            var selResp = await SendAndWaitAsync("DOM.querySelector", new { nodeId = rootId, selector });
+            var selResp = await SendAndWaitAsync("DOM.querySelector", new { nodeId = rootId, selector }, _sessionId);
 
             if (selResp.GetProperty("result").GetProperty("nodeId").GetInt32() == 0)
                 return null; // No encontrado
 
-            var htmlResp = await SendAndWaitAsync("DOM.getOuterHTML", new { nodeId = rootId }); // Nota: En CDP, getOuterHTML requiere el nodeId real, no el root.
+            var htmlResp = await SendAndWaitAsync("DOM.getOuterHTML", new { nodeId = rootId }, _sessionId); // Nota: En CDP, getOuterHTML requiere el nodeId real, no el root.
             return htmlResp.GetProperty("result").GetProperty("outerHTML").GetString();
         }
 
@@ -166,31 +200,109 @@ namespace CDP
         public async Task ClearCache()
         {
             await _ready.Task;
-            await SendAndWaitAsync("Network.clearBrowserCache", new { });
+            await SendAndWaitAsync("Network.clearBrowserCache", new { }, _sessionId);
         }
 
         /// <summary>Zubi.CDP.SetHeaders({ "Authorization": "Bearer token" })</summary>
         public async Task SetHeaders(Dictionary<string, string> headers)
         {
             await _ready.Task;
-            await SendAndWaitAsync("Network.setExtraHTTPHeaders", new { headers });
+            await SendAndWaitAsync("Network.setExtraHTTPHeaders", new { headers }, _sessionId);
+        }
+
+        /// <summary>
+        /// Zubi.CDP.OpenDevTools("console") 
+        /// Abre las DevTools en la pestaña especificada. 
+        /// Paneles soportados: elements, console, network, sources, resources, timeline, chrome-recorder, heap-profiler.
+        /// </summary>
+        public async Task OpenDevTools(string? panelId = null)
+        {
+            await _ready.Task;
+            TabNoDetected();
+
+            var @params = new Dictionary<string, object> { { "targetId", _targetId! } };
+
+            if (!string.IsNullOrWhiteSpace(panelId))
+                @params["panelId"] = panelId;
+
+            await SendAndWaitAsync("Target.openDevTools", @params);
+        }
+
+        /// <summary>
+        /// Zubi.CDP.SetWindowState("maximized") 
+        /// Cambia el estado de la ventana. Estados válidos: "normal", "minimized", "maximized", "fullscreen".
+        /// </summary>
+        public async Task SetWindowState(string state)
+        {
+            await _ready.Task;
+            TabNoDetected();
+
+            // 1. Validar el estado para no saturar el socket con peticiones inválidas
+            var validStates = new[] { "normal", "minimized", "maximized", "fullscreen" };
+
+            if (!validStates.Contains(state.ToLowerInvariant()))
+                throw new ArgumentException($"Invalid state: '{state}'. Use one of: {string.Join(", ", validStates)}");
+            
+
+            // 2. Obtener el ID de la ventana asociada a nuestra pestaña
+            var winResp = await SendAndWaitAsync("Browser.getWindowForTarget", new { targetId = _targetId });
+
+            if (!winResp.TryGetProperty("result", out var result) || !result.TryGetProperty("windowId", out var windowIdProp))
+                throw new InvalidOperationException("Could not obtain the windowId for the window.");
+
+            var windowId = windowIdProp.GetInt32();
+
+            // 3. Aplicar el estado
+            // IMPORTANTE: CDP rechaza la petición si envías windowState junto con left, top, width o height.
+            await SendAndWaitAsync("Browser.setWindowBounds", new
+            {
+                windowId,
+                bounds = new { windowState = state.ToLowerInvariant() }
+            });
+        }
+
+        /// <summary>
+        /// Zubi.CDP.SetWindowGeometry(100, 100, 800, 600)
+        /// Mueve y redimensiona la ventana. Si estaba maximizada, la devuelve a "normal" automáticamente.
+        /// </summary>
+        public async Task SetWindowGeometry(int left, int top, int width, int height)
+        {
+            await _ready.Task;
+            TabNoDetected();
+
+            var winResp = await SendAndWaitAsync("Browser.getWindowForTarget", new { targetId = _targetId });
+            var windowId = winResp.GetProperty("result").GetProperty("windowId").GetInt32();
+
+            // Nota: Enviamos "windowState: normal" junto con la geometría. 
+            // En este caso, CDP sí lo permite porque "normal" es la base para la geometría.
+            await SendAndWaitAsync("Browser.setWindowBounds", new
+            {
+                windowId,
+                bounds = new
+                {
+                    left,
+                    top,
+                    width,
+                    height
+                }
+            });
         }
 
         protected override void Dispose(bool disposing)
         {
-            _ws?.Dispose();
-            _ws = null;
+            _browserWs?.Dispose();
+            _browserWs = null;
         }
 
         //=========================================//
 
-        private async Task ListenAsync()
+        private async Task ListenAsync(ClientWebSocket ws)
         {
             try
             {
-                while (_ws?.State == WebSocketState.Open)
+                while (ws?.State == WebSocketState.Open)
                 {
-                    var payload = await ReceiveFullMessageAsync(_ws, CancellationToken.None);
+                    var payload = await ReceiveFullMessageAsync(ws, CancellationToken.None);
 
                     if (payload is null) 
                         break;
@@ -248,26 +360,67 @@ namespace CDP
             }
         }
 
-        private async Task<JsonElement> SendAndWaitAsync(string method, object @params)
+        private async Task<JsonElement> SendAndWaitAsync(string method, object @params, string? sessionId = null)
         {
             var id = Interlocked.Increment(ref _nextId);
-            var json = JsonSerializer.Serialize(new { id, method, @params });
+
+            // Si hay sessionId, lo inyectamos en el mensaje
+            var payload = new Dictionary<string, object>
+            {
+                { "id", id },
+                { "method", method },
+                { "params", @params }
+            };
+
+            if (sessionId != null) 
+                payload["sessionId"] = sessionId;
+
+            var json = JsonSerializer.Serialize(payload);
             var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pending[id] = tcs;
 
             await _sendLock.WaitAsync();
             try
             {
-                await _ws!.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(json)), WebSocketMessageType.Text, true, CancellationToken.None);
+                await _browserWs!.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(json)), WebSocketMessageType.Text, true, CancellationToken.None);
             }
-            catch
-            {
-                _pending.TryRemove(id, out _);
-                throw;
+            catch 
+            { 
+                _pending.TryRemove(id, out _); 
+                throw; 
             }
             finally { _sendLock.Release(); }
 
             return await tcs.Task;
+        }
+
+        private async Task<string> GetWindowState()
+        {
+            await _ready.Task;
+            
+            if (string.IsNullOrEmpty(_targetId)) 
+                return "normal";
+
+            try
+            {
+                var resp = await SendAndWaitAsync("Browser.getWindowForTarget", new { targetId = _targetId });
+
+                if (resp.TryGetProperty("result", out var result) && result.TryGetProperty("bounds", out var bounds))
+                {
+                    // Misma lógica: si no hay windowState, es "normal"
+                    var state = bounds.TryGetProperty("windowState", out var stateProp) ? stateProp.GetString() ?? "normal" : "normal";
+                    return state;
+                }
+            }
+            catch { }
+
+            return "normal";
+        }
+
+        private void TabNoDetected()
+        {
+            if (string.IsNullOrEmpty(_targetId))
+                throw new InvalidOperationException("The tab's targetId has not been detected.");
         }
 
         private static async Task<byte[]?> ReceiveFullMessageAsync(WebSocket ws, CancellationToken ct)
@@ -305,8 +458,9 @@ namespace CDP
             }
         }
 
-        private static async Task<string?> GetWebSocketUrlAsync(Uri uri)
+        private static async Task<(string?, string?)> GetWebSocketUrlAsync(Uri uri)
         {
+            string? targetId = null;
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -326,7 +480,13 @@ namespace CDP
                         continue;
 
                     if (tab.TryGetProperty("webSocketDebuggerUrl", out var ws))
-                        return ws.GetString();
+                    {
+                        if (tab.TryGetProperty("id", out var idProp))
+                            targetId = idProp.GetString();
+                        
+                        return (ws.GetString(), targetId);
+                    }
+                        
                 }
 
                 // 2º preferencia: la primera pestaña disponible.
@@ -336,11 +496,31 @@ namespace CDP
                         continue;
 
                     if (tab.TryGetProperty("webSocketDebuggerUrl", out var ws))
-                        return ws.GetString();
+                    {
+                        if (tab.TryGetProperty("id", out var idProp))
+                            targetId = idProp.GetString();
+                        
+                        return (ws.GetString(), targetId);
+                    }
+                        
                 }
             }
             catch { /* devolvemos null */ }
 
+            return (null, null);
+        }
+
+        private static async Task<string?> DiscoverBrowserWebSocketAsync(Uri uri)
+        {
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                var json = await http.GetStringAsync($"{uri.Scheme}://{uri.Host}:{App.Browser.DebugPort}/json/version");
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var ws))
+                    return ws.GetString();
+            }
+            catch { }
             return null;
         }
     
