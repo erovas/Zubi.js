@@ -1,4 +1,4 @@
-﻿namespace CDP
+﻿namespace CDP.DTOs
 {
     public class WindowGeometry
     {
