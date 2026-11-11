@@ -16,7 +16,7 @@ namespace Essentials
         {
             Name = MyApp.Name;
             BaseDirectory = MyApp.BaseDirectory;
-            Storage = new();
+            Storage = new(MyApp.Storage);
             Platform = MyApp.Platform;
             IsDebugging = MyApp.IsDebugging;
             Browser = MyApp.Browser;

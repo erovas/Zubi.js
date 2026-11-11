@@ -5,14 +5,18 @@ namespace Essentials
 {
     public sealed class AppStorage : Plugin
     {
-        private static ConcurrentDictionary<string, object?> Storage => Zubi.js.App.Storage;
+        private readonly ConcurrentDictionary<string, object?> Storage;
 
         public int Count => Storage.Count;
         public bool IsEmpty => Storage.IsEmpty;
         public string[] Keys => Storage.Keys.ToArray();
         public object?[] Values => Storage.Values.ToArray();
 
-        
+        internal AppStorage(ConcurrentDictionary<string, object?> storage)
+        {
+            Storage = storage;
+        }
+
         public object? Get(string key)
         {
             return Storage[key];
