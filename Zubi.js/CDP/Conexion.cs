@@ -151,7 +151,6 @@ namespace CDP
 
         public async Task<JsonElement> SendToPageAsync(string method, object @params)
         {
-            await _ready.Task;
             return await SendAndWaitAsync(method, @params, await SessionId);
         }
 
@@ -159,13 +158,6 @@ namespace CDP
         {
             await _ready.Task;
             return await SendAndWaitAsync(method, @params, null);
-        }
-
-        public static async Task<Conexion> NewInstance(Uri uri, int debugPort)
-        {
-            var conexion = new Conexion();
-            await conexion.Initialize(uri, debugPort);
-            return conexion;
         }
 
         private async Task ListenAsync(ClientWebSocket ws)
