@@ -246,7 +246,7 @@ namespace Zubi.js.Helpers
 
             if (exe is null || candidate is null)
             {
-                App.Handler = LaunchDefaultBrowser(url);
+                App._Process = LaunchDefaultBrowser(url);
                 return;
             }
 
@@ -258,7 +258,7 @@ namespace Zubi.js.Helpers
 
             // 3. Lanzar el proceso
             var proc = Process.Start(psi);
-            App.Handler = proc;
+            App._Process = proc;
 
             // 4. Redimensionar ventana de WebKit después del lanzamiento (si es necesario)
             if (candidate.Engine == BrowserEngine.WebKit && config.State == BrowserState.Normal)
@@ -300,6 +300,7 @@ namespace Zubi.js.Helpers
                     psi.ArgumentList.Add($"--app={url}");
                     psi.ArgumentList.Add("--no-first-run");
                     psi.ArgumentList.Add("--no-default-browser-check");
+                    psi.ArgumentList.Add("--disable-windows10-custom-titlebar");
 
                     if(config.DebugPort > 0)
                         psi.ArgumentList.Add($"--remote-debugging-port={config.DebugPort}");

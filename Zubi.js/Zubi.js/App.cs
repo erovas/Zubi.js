@@ -36,8 +36,8 @@ namespace Zubi.js
         /// </summary>
         public static BrowserData Browser { get; internal set; }
 
-
-        internal static Process? Handler;
+        internal static Process? _Process;
+        public static Process Process => _Process!;
 
         static App()
         {
@@ -60,7 +60,7 @@ namespace Zubi.js
 
         public static void Close()
         {
-            var proc = Handler;
+            var proc = _Process;
             if (proc is null) 
                 return;
 
@@ -79,7 +79,7 @@ namespace Zubi.js
             }
             finally
             {
-                Handler = null;
+                _Process = null;
             }
         }
     }
