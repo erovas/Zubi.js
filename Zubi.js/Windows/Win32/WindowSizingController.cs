@@ -14,7 +14,6 @@ namespace Windows.Win32
 
         // ── Constantes internas ──────────────────────────────────────
         private const int WH_MOUSE_LL = 14;
-        private const int VK_LBUTTON = 0x01;
         private const uint WM_MOUSEMOVE = 0x0200;
         private const uint WM_LBUTTONUP = 0x0202;
         private const uint WM_QUIT = 0x0012;
@@ -112,16 +111,20 @@ namespace Windows.Win32
 
         private void EnsureThreadStarted()
         {
-            if (_running) return;
+            if (_running) 
+                return;
+
             lock (_startLock)
             {
-                if (_running) return;
+                if (_running) 
+                    return;
+
                 _running = true;
 
                 _thread = new Thread(Run)
                 {
                     IsBackground = true,
-                    Name = "WindowDragResizeThread"
+                    Name = "WindowSizingControllerThread"
                 };
                 _thread.SetApartmentState(ApartmentState.STA);
                 _thread.Start();
@@ -174,10 +177,6 @@ namespace Windows.Win32
         {
             if (_hitTest != 0 || hwnd == IntPtr.Zero)
                 return;
-
-            // Si el botón izquierdo no está pulsado, no hay gesto real.
-            //if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0) 
-            //    return;
 
             User32.GetCursorPos(out _startCursor);
             User32.GetWindowRect(hwnd, out _startRect);

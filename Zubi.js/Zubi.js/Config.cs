@@ -36,5 +36,6 @@ namespace Zubi.js
         public int Height { get; init; } = -1;
         public int DebugPort { get; init; } = 0;
         public bool LiveReload { get; init; } = false;
+        public bool AllowInspector { get; init; } = true;
     }
 }

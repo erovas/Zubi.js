@@ -240,64 +240,6 @@ namespace Windows.Win32
             }
         }
 
-        public static void WindowDrag(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTCAPTION, 0);
-        }
-
-        public static void WindowResizeTopLeft(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTTOPLEFT, 0);
-
-        }
-
-        public static void WindowResizeTopRight(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTTOPRIGHT, 0);
-        }
-
-        public static void WindowResizeBottomLeft(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTBOTTOMLEFT, 0);
-        }
-
-        public static void WindowResizeBottomRight(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTBOTTOMRIGHT, 0);
-        }
-
-        public static void WindowResizeLeft(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTLEFT, 0);
-
-        }
-
-        public static void WindowResizeRight(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTRIGHT, 0);
-
-        }
-
-        public static void WindowResizeTop(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTTOP, 0);
-
-        }
-
-        public static void WindowResizeBottom(IntPtr hwnd)
-        {
-            User32.ReleaseCapture();
-            _ = User32.SendMessage(hwnd, (uint)WinMsg.WM_NCLBUTTONDOWN, (int)WM_NCHITTEST.HTBOTTOM, 0);
-        }
-
         public static RECT GetWorkArea(IntPtr hwnd)
         {
             IntPtr hMonitor = User32.MonitorFromWindow(hwnd, 0x00000000 /* MONITOR_DEFAULTTONULL */);

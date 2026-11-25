@@ -302,7 +302,14 @@ namespace Zubi.js.Helpers
                     psi.ArgumentList.Add("--no-default-browser-check");
                     psi.ArgumentList.Add("--disable-windows10-custom-titlebar");
 
-                    if(config.DebugPort > 0)
+                    if (!config.AllowInspector)
+                    {
+                        psi.ArgumentList.Add("--disable-dev-tools");
+                        psi.ArgumentList.Add("--disable-devtools");
+                        psi.ArgumentList.Add("--devtools-flags=disable");  // Funciona
+                    }
+
+                    if (config.DebugPort > 0)
                         psi.ArgumentList.Add($"--remote-debugging-port={config.DebugPort}");
 
                     if (theme == BrowserTheme.Dark)
@@ -397,6 +404,9 @@ namespace Zubi.js.Helpers
                                     prefs.Add("user_pref(\"layout.css.prefers-color-scheme.content-override\", 0);");
                                 }
 
+                                if (!config.AllowInspector)
+                                    prefs.Add("user_pref(\"devtools.policy.disabled\", true);");
+                                
                                 // Escribimos (sobrescribiendo) el archivo user.js en el perfil.
                                 // En un escenario real, podrías querer hacer un merge si ya existe.
                                 File.WriteAllLines(userJsPath, prefs);

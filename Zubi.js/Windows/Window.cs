@@ -137,44 +137,44 @@ namespace Windows
             dragResize?.Drag();
         }
 
-        public Task ResizeTopLeft()
+        public void ResizeTopLeft()
         {
-            return Task.Run(() => Utils32.WindowResizeTopLeft(Handle));
+            dragResize?.ResizeTopLeft();
         }
 
-        public Task ResizeTopRight()
+        public void ResizeTopRight()
         {
-            return Task.Run(() => Utils32.WindowResizeTopRight(Handle));
+            dragResize?.ResizeTopRight();
         }
 
-        public Task ResizeBottomLeft()
+        public void ResizeBottomLeft()
         {
-            return Task.Run(() => Utils32.WindowResizeBottomLeft(Handle));
+            dragResize?.ResizeBottomLeft();
         }
 
-        public Task ResizeBottomRight()
+        public void ResizeBottomRight()
         {
-            return Task.Run(() => Utils32.WindowResizeBottomRight(Handle));
+            dragResize?.ResizeBottomRight();
         }
 
-        public Task ResizeLeft()
+        public void ResizeLeft()
         {
-            return Task.Run(() => Utils32.WindowResizeLeft(Handle));
+            dragResize?.ResizeLeft();
         }
 
-        public Task ResizeRight()
+        public void ResizeRight()
         {
-            return Task.Run(() => Utils32.WindowResizeRight(Handle));
+            dragResize?.ResizeRight();
         }
 
-        public Task ResizeTop()
+        public void ResizeTop()
         {
-            return Task.Run(() => Utils32.WindowResizeTop(Handle));
+            dragResize?.ResizeTop();
         }
 
-        public Task ResizeBottom()
+        public void ResizeBottom()
         {
-            return Task.Run(() => Utils32.WindowResizeBottom(Handle));
+            dragResize?.ResizeBottom();
         }
 
         public bool Minimize()
