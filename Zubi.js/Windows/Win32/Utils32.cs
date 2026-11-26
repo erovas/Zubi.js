@@ -17,6 +17,27 @@ namespace Windows.Win32
             if (User32.IsIconic(hwnd))
                 return WindowState.Minimized;
 
+            if (!User32.GetWindowRect(hwnd, out RECT windowRect))
+                return WindowState.Normalized;
+
+            IntPtr monitor = User32.MonitorFromWindow(hwnd, 0x00000002 /* MONITOR_DEFAULTTONEAREST */);
+            if (monitor != IntPtr.Zero)
+            {
+                var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+                if (User32.GetMonitorInfo(monitor, ref monitorInfo))
+                {
+                    RECT monitorRect = monitorInfo.rcMonitor;
+
+                    if (windowRect.Left <= monitorRect.Left + 1 &&
+                        windowRect.Top <= monitorRect.Top + 1 &&
+                        windowRect.Right >= monitorRect.Right - 1 &&
+                        windowRect.Bottom >= monitorRect.Bottom - 1)
+                    {
+                        return WindowState.Fullscreen;
+                    }
+                }
+            }
+
             if (User32.IsZoomed(hwnd))
                 return WindowState.Maximized;
 
@@ -25,18 +46,33 @@ namespace Windows.Win32
 
         public static bool SetWindowState(IntPtr hwnd, WindowState state)
         {
-            if (GetWindowState(hwnd) == state)
+            var currentState = GetWindowState(hwnd);
+
+            if (currentState == state)
                 return true;
 
-            ShowWinCmd action = state switch
+            if(state != WindowState.Fullscreen)
             {
-                WindowState.Minimized => ShowWinCmd.SW_MINIMIZE,
-                WindowState.Normalized => ShowWinCmd.SW_NORMAL,   // SW_SHOWNORMAL
-                WindowState.Maximized => ShowWinCmd.SW_MAXIMIZE,
-                _ => throw new ArgumentOutOfRangeException(nameof(state))
-            };
+                ShowWinCmd action = state switch
+                {
+                    WindowState.Minimized => ShowWinCmd.SW_MINIMIZE,
+                    WindowState.Normalized => ShowWinCmd.SW_NORMAL,   // SW_SHOWNORMAL
+                    WindowState.Maximized => ShowWinCmd.SW_MAXIMIZE,
+                    _ => throw new ArgumentOutOfRangeException(nameof(state))
+                };
 
-            User32.ShowWindow(hwnd, action);
+                User32.ShowWindow(hwnd, action);
+            }
+            else
+            {
+                if (currentState == WindowState.Minimized)
+                {
+                    User32.ShowWindow(hwnd, ShowWinCmd.SW_RESTORE);
+                    Thread.Sleep(150);
+                }
+                return ToggleBrowserFullScreen(hwnd, true);
+            }
+            
             return GetWindowState(hwnd) == state;
         }
 
@@ -57,33 +93,15 @@ namespace Windows.Win32
                 );
         }
 
-        public static bool WindowRestore(IntPtr hwnd)
+        public static void WindowRestore(IntPtr hwnd)
         {
-            // Si no está minimizada, ya está restaurada.
-            if (!User32.IsIconic(hwnd))
-                return true;
-
-            // SW_RESTORE restaura al estado anterior (normal o maximizada)
-            // usando internamente WPF_RESTORETOMAXIMIZED. Además activa la ventana.
-            User32.ShowWindow(hwnd, ShowWinCmd.SW_RESTORE);
-
-            return !User32.IsIconic(hwnd);
-        }
-
-        public static bool WindowRestore(IntPtr hwnd, WindowState lastState)
-        {
-            if (!User32.IsIconic(hwnd))
-                return true;
-
-            ShowWinCmd action = lastState switch
+            if(GetWindowState(hwnd) == WindowState.Fullscreen)
             {
-                WindowState.Maximized => ShowWinCmd.SW_MAXIMIZE,
-                WindowState.Normalized => ShowWinCmd.SW_NORMAL,
-                _ => ShowWinCmd.SW_RESTORE
-            };
+                ToggleBrowserFullScreen(hwnd, false);
+                return;
+            }
 
-            User32.ShowWindow(hwnd, action);
-            return !User32.IsIconic(hwnd);
+            User32.ShowWindow(hwnd, ShowWinCmd.SW_RESTORE);
         }
 
         public static bool WindowIsActive(IntPtr hwnd)
@@ -436,6 +454,87 @@ namespace Windows.Win32
         {
             if (hwnd == IntPtr.Zero || !User32.IsWindow(hwnd))
                 throw new ArgumentException("Invalid window handle.", nameof(hwnd));
+        }
+
+        private static bool ToggleBrowserFullScreen(IntPtr hwnd, bool expectedFullScreen)
+        {
+            // --- Intento 1: PostMessage (no roba foco, funciona en Firefox) ---
+            WindowActivate(hwnd);
+            User32.PostMessage(hwnd, (uint)WinMsg.WM_KEYDOWN, (IntPtr)0x7A /* VK_F11 */, IntPtr.Zero);
+            User32.PostMessage(hwnd, (uint)WinMsg.WM_KEYUP, (IntPtr)0x7A /* VK_F11 */, IntPtr.Zero);
+
+            if (WaitForState(hwnd, expectedFullScreen, timeoutMs: 1000))
+                return true;
+
+            // --- Intento 2: SendInput tras traer al frente (funciona en Chrome/Edge) ---
+            return ForceSendF11(hwnd, expectedFullScreen);
+        }
+
+        private static bool ForceSendF11(IntPtr hwnd, bool expectedFullScreen)
+        {
+            if (User32.IsIconic(hwnd)) 
+                User32.ShowWindow(hwnd, ShowWinCmd.SW_RESTORE);
+
+            IntPtr previousForeground = User32.GetForegroundWindow();
+            bool needsFocus = previousForeground != hwnd;
+
+            if (needsFocus)
+            {
+                uint foregroundThread = User32.GetWindowThreadProcessId(previousForeground, out _);
+                uint currentThread = User32.GetCurrentThreadId();
+                bool attached = false;
+
+                if (foregroundThread != currentThread)
+                    attached = User32.AttachThreadInput(currentThread, foregroundThread, true);
+
+                try
+                {
+                    User32.SetForegroundWindow(hwnd);
+                    User32.BringWindowToTop(hwnd);
+                    Thread.Sleep(80);
+                }
+                finally
+                {
+                    if (attached)
+                        User32.AttachThreadInput(currentThread, foregroundThread, false);
+                }
+            }
+
+            var inputs = new INPUT[2];
+
+            inputs[0].type = 1 /* INPUT_KEYBOARD */;
+            inputs[0].U.ki.wVk = 0x7A /* VK_F11 */;
+            inputs[0].U.ki.dwFlags = 0;
+
+            inputs[1].type = 1 /* INPUT_KEYBOARD */;
+            inputs[1].U.ki.wVk = 0x7A /* VK_F11 */;
+            inputs[1].U.ki.dwFlags = 0x0002 /* KEYEVENTF_KEYUP */;
+
+            User32.SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+
+            return WaitForState(hwnd, expectedFullScreen, timeoutMs: 1500);
+        }
+
+        // Espera (con polling) a que el estado de la ventana cambie al esperado.
+        // F11 es asíncrono: no se refleja en GetWindowState hasta unos ms después.
+        private static bool WaitForState(IntPtr hwnd, bool expectedFullScreen, int timeoutMs)
+        {
+            int elapsed = 0;
+            const int step = 50;
+
+            while (elapsed < timeoutMs)
+            {
+                Thread.Sleep(step);
+                elapsed += step;
+
+                WindowState s = GetWindowState(hwnd);
+                if (expectedFullScreen && s == WindowState.Fullscreen) 
+                    return true;
+
+                if (!expectedFullScreen && s != WindowState.Fullscreen) 
+                    return true;
+            }
+            return false;
         }
 
         #endregion

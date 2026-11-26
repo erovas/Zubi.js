@@ -182,9 +182,9 @@ namespace Windows
             return Utils32.SetWindowState(Handle, WindowState.Minimized);
         }
 
-        public bool Restore()
+        public void Restore()
         {
-            return Utils32.WindowRestore(Handle);
+            Utils32.WindowRestore(Handle);
         }
 
         public bool Maximize()
@@ -195,6 +195,11 @@ namespace Windows
         public bool Normalize()
         {
             return Utils32.SetWindowState(Handle, WindowState.Normalized);
+        }
+
+        public bool Fullscreen()
+        {
+            return Utils32.SetWindowState(Handle, WindowState.Fullscreen);
         }
 
         public void SetRect(int x, int y, int width, int height)
