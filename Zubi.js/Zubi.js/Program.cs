@@ -15,11 +15,12 @@ namespace Zubi.js
 
         private static async Task<int> MainAsync(string[] args)
         {
-            var config = Config.Load(Utils.GetFullDirectory("config.json", false));
-            var port = Utils.FindFreePort(config.Browser.DebugPort);
+            var config = Config.Load(Path.Combine(App.BaseDirectory, "config.json"));
+            var configBrowser = config.Browser;
+            var port = Utils.FindFreePort(configBrowser.DebugPort);
             var localOrigin = Utils.GetUrlPort(port);
-            var srcPath = App.BaseDirectory;
-            var plugins = new Plugins();
+            var srcPath = Utils.ResolveDirectory(configBrowser.Directory);
+            var plugins = new Plugins(config.Plugins);
             var session = new SessionStore();
             var tracker = new ConnectionTracker(config.ShutdownSeconds);
             var shutdownTcs = new TaskCompletionSource<bool>();
@@ -40,7 +41,7 @@ namespace Zubi.js
 
             LiveReloadWatcher? liveReload = null;
 
-            if (config.Browser.LiveReload)
+            if (configBrowser.LiveReload)
             {
                 liveReload = new LiveReloadWatcher(App.BaseDirectory);
                 Console.WriteLine("LiveReload activado.");
@@ -53,7 +54,7 @@ namespace Zubi.js
             Console.WriteLine($"Master:      {session.MasterToken.Substring(0, 12)}…");
             Console.WriteLine($"Abriendo:    {url}");
 
-            BrowserLauncher.Launch(url, config.Browser);
+            BrowserLauncher.Launch(url, configBrowser);
 
             Console.WriteLine("Debug port ready");
 

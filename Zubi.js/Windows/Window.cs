@@ -32,7 +32,7 @@ namespace Windows
             if (Initialized)
                 throw new InvalidOperationException("An instance of Window already exists.");
 
-            Handle = Handle == IntPtr.Zero ? Utils32.GetHandle(App.Process, App.Browser) : Handle;
+            Handle = Utils32.GetHandle(App.Process, App.Browser);
             Utils32.CheckWindowHandle(Handle);
             hook = new(Handle)
             {

@@ -56,12 +56,12 @@ namespace Zubi.js.Bridge
             var origin = req.Headers["Origin"];
 
             // Comprobar que la petición es de un origen permitido
-            if (origin is null || !_allowedOrigins.Contains(origin))
-            {
-                ctx.Response.StatusCode = 403;
-                ctx.Response.Close();
-                return;
-            }
+            //if (origin is null || !_allowedOrigins.Contains(origin))
+            //{
+            //    ctx.Response.StatusCode = 403;
+            //    ctx.Response.Close();
+            //    return;
+            //}
 
             // Comprobar que el token es valido
             if (!_session.IsValidTabToken(req.QueryString["token"]))
@@ -81,7 +81,8 @@ namespace Zubi.js.Bridge
             finally 
             {
                 ConnectedSockets.TryRemove(socketId, out _);
-                _tracker.OnDisconnected(); 
+                _plugins.DisposeAll();
+                _tracker.OnDisconnected();
             }
         }
 

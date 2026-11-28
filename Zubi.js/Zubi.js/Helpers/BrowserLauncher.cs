@@ -301,6 +301,8 @@ namespace Zubi.js.Helpers
                     psi.ArgumentList.Add("--no-first-run");
                     psi.ArgumentList.Add("--no-default-browser-check");
                     psi.ArgumentList.Add("--disable-windows10-custom-titlebar");
+                    psi.ArgumentList.Add("--no-first-run"); // Omitir asistente primera ejecución
+                    psi.ArgumentList.Add("--no-default-browser-check");  // Desactivar comprobación navegador predeterminado.
 
                     if (!config.AllowInspector)
                     {
@@ -373,6 +375,9 @@ namespace Zubi.js.Helpers
                         psi.ArgumentList.Add("-height");
                         psi.ArgumentList.Add($"{height}");
                     }
+                    
+                    psi.ArgumentList.Add("--no-first-run");
+                    psi.ArgumentList.Add("--no-default-browser-check");
 
                     // Evitar reutilizar instancia ya abierta
                     psi.ArgumentList.Add("--new-instance");
@@ -406,7 +411,16 @@ namespace Zubi.js.Helpers
 
                                 if (!config.AllowInspector)
                                     prefs.Add("user_pref(\"devtools.policy.disabled\", true);");
-                                
+
+                                // Evitar comprobación navegador predeterminado
+                                prefs.Add("user_pref(\"browser.shell.checkDefaultBrowser\", false);");
+
+                                // Omitir comprobación navegador predeterminado en primer arranque
+                                prefs.Add("user_pref(\"browser.shell.skipDefaultBrowserCheckOnFirstRun\", true);");
+
+                                // Desactivar barra notificación sobre navegador predeterminado
+                                prefs.Add("user_pref(\"browser.defaultbrowser.notificationbar\", false);");
+
                                 // Escribimos (sobrescribiendo) el archivo user.js en el perfil.
                                 // En un escenario real, podrías querer hacer un merge si ya existe.
                                 File.WriteAllLines(userJsPath, prefs);

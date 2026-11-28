@@ -8,6 +8,7 @@ namespace Zubi.js
         public string[] AllowedOrigins { get; init; } = [];
         public int ShutdownSeconds { get; init; } = 3;
         public ConfigBrowser Browser { get; init; } = new();
+        public ConfigPlugins Plugins { get; init; } = new();
 
         public static Config Load(string path)
         {
@@ -28,6 +29,7 @@ namespace Zubi.js
 
     internal sealed class ConfigBrowser
     {
+        public string Directory {  get; init; } = string.Empty;
         public string Name { get; init; } = string.Empty;
         public ProfileMode Mode { get; init; } = ProfileMode.Named;
         public BrowserState State { get; init; } = BrowserState.Normal;
@@ -37,5 +39,10 @@ namespace Zubi.js
         public int DebugPort { get; init; } = 0;
         public bool LiveReload { get; init; } = false;
         public bool AllowInspector { get; init; } = true;
+    }
+
+    internal sealed class ConfigPlugins
+    {
+        public string Directory { get; init; } = string.Empty;
     }
 }

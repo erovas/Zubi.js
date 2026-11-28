@@ -12,6 +12,7 @@ namespace Zubi.js.Helpers
     {
         public const string INDEX_HTML = "index.html";
         public const string PLUGINS = "Plugins";
+        public const string ZUBI_BRIDGE = "ZubiBridge.js";
 
         public static readonly JsonSerializerOptions JsonReadOptions = new()
         {
@@ -297,25 +298,57 @@ namespace Zubi.js.Helpers
             }
         }
 
-        public static string GetFullDirectory(string? path, bool throwEx = true)
+        public static string CheckDirectory(string? inputPath,  string basePath)
         {
-            string basePath = Path.GetFullPath(App.BaseDirectory);
+            if (string.IsNullOrWhiteSpace(inputPath))
+                return basePath;
 
-            if (string.IsNullOrWhiteSpace(path))
-                path = basePath;
+            string absolutePath = Path.GetFullPath(Path.Combine(basePath, inputPath));
 
-            path = Path.GetFullPath(path.TrimStart('/', '\\'), basePath);
+            if (File.Exists(absolutePath))
+                return Path.GetDirectoryName(absolutePath) ?? basePath;
 
-            if (!string.IsNullOrWhiteSpace(Path.GetExtension(path)))
-                if (!File.Exists(path) && throwEx)
-                    throw new FileNotFoundException($"The file [{path}] does not exist");
-                else
-                    return path;
+            if (!Directory.Exists(absolutePath))
+                throw new DirectoryNotFoundException(absolutePath);
 
-            else if (!Directory.Exists(path) && throwEx)
-                throw new Exception($"The directory [{path}] does not exist");
+            return absolutePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
 
-            return path;
+        public static string ResolveDirectory(string? inputPath)
+        {
+            string basePath = App.BaseDirectory;
+
+            if (string.IsNullOrWhiteSpace(inputPath))
+                return basePath;
+
+            string absolutePath = Path.GetFullPath(Path.Combine(basePath, inputPath));
+
+            if (File.Exists(absolutePath))
+                return Path.GetDirectoryName(absolutePath) ?? basePath;
+
+            if (!Directory.Exists(absolutePath))
+                    Directory.CreateDirectory(absolutePath);
+
+            return absolutePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        public static string CheckFilePath(string? inputPath, string ext, string basePath = "")
+        {
+            if(string.IsNullOrWhiteSpace(basePath))
+                basePath = App.BaseDirectory;
+
+            if (string.IsNullOrWhiteSpace(inputPath))
+                throw new ArgumentException("The path cannot be empty.", nameof(inputPath));
+
+            if(Path.GetExtension(inputPath)?.ToUpper() != ext.ToUpper())
+                throw new Exception($"The file does not have a '{ext}' extension.");
+
+            string absolutePath = Path.GetFullPath(Path.Combine(basePath, inputPath));
+
+            if (!File.Exists(absolutePath))
+                throw new FileNotFoundException($"The file [{absolutePath}] does not exist");
+
+            return absolutePath;
         }
 
         public static int FindFreePort(int excludedPort = 0)

@@ -26,6 +26,12 @@ namespace Zubi.js.PluginManager
         /// </summary>
         private readonly ConcurrentDictionary<string, Type> _Types = new();
 
+        private readonly string _directory;
+
+        public Plugins(ConfigPlugins config)
+        {
+            _directory = Utils.ResolveDirectory(config.Directory);
+        }
 
         #region Properties
 
@@ -67,11 +73,10 @@ namespace Zubi.js.PluginManager
 
         public AssemblyLoadResult[] LoadFrom(string? folderPath = null)
         {
-            folderPath = GetFullDirectory(folderPath);
-
+            folderPath = Utils.CheckDirectory(folderPath, _directory);
             List<AssemblyLoadResult> results = new();
 
-            foreach (string pluginPath in System.IO.Directory.GetFiles(folderPath, "*.dll", SearchOption.AllDirectories))
+            foreach (string pluginPath in Directory.GetFiles(folderPath, "*.dll", SearchOption.AllDirectories))
                 results.Add(LoadAux(pluginPath));
 
             return results.ToArray();
@@ -233,7 +238,7 @@ namespace Zubi.js.PluginManager
         {
             try
             {
-                assemblyPath = GetFullDirectory(assemblyPath);
+                assemblyPath = Utils.CheckFilePath(assemblyPath, ".dll", _directory);
 
                 // Verificar si ya estaba cargada la dll
                 foreach (var val in this._Imported.Values)
@@ -310,11 +315,6 @@ namespace Zubi.js.PluginManager
             {
                 throw;
             }
-        }
-
-        private static string GetFullDirectory(string? path)
-        {
-            return Utils.GetFullDirectory(path);
         }
 
         // Construye un Delegate compatible con la firma del evento.

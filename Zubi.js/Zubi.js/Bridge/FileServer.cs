@@ -15,7 +15,6 @@ namespace Zubi.js.Bridge
         private readonly string _rootPath;
         private readonly SessionStore _session;
         private readonly Plugins _plugins;
-        private int _indexRequestCount;
 
         public Func<HttpListenerContext, Task>? WebSocketHandler { get; set; }
 
@@ -95,6 +94,19 @@ namespace Zubi.js.Bridge
             var isIndex = rel.Equals(Utils.INDEX_HTML, StringComparison.OrdinalIgnoreCase);
             var exists = File.Exists(full);
 
+            // Evitar que se acceda fuera de la carpeta "src"
+            if (!full.StartsWith(_rootPath, StringComparison.Ordinal))
+            {
+                await WriteTextAsync(ctx, 403, "Forbidden");
+                return;
+            }
+
+            if (rel == Utils.ZUBI_BRIDGE)
+            {
+                await WriteBytesAsync(ctx, 200, Encoding.UTF8.GetBytes(Resources.MainScript), GetContentType(rel), true);
+                return;
+            }
+
             if (!isIndex && !exists)
             {
                 await WriteTextAsync(ctx, 404, "Not Found");
@@ -103,18 +115,12 @@ namespace Zubi.js.Bridge
 
             var contentType = GetContentType(full);
 
-            // Se va a cargar el index.html
-            // Se inyecta la magia
             if (isIndex)
             {
                 var html = exists ? await File.ReadAllTextAsync(full) : Resources.ErrorPage;
 
                 if (req.HttpMethod == "GET")
-                {
-                    // Solo limpia a partir de la segunda petición (recarga real)
-                    if (Interlocked.Increment(ref _indexRequestCount) > 1)
-                        _plugins.DisposeAll();
-                    
+                {                    
                     var tabToken = _session.ConsumeMasterToken(req.QueryString["token"]);
                     var meta = tabToken is not null ? $"<meta name=\"bridge-token\" content=\"{tabToken}\">" : string.Empty;
                     var script = "<script>";

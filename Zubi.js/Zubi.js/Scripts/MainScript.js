@@ -1,4 +1,4 @@
-﻿(() => {
+﻿(_ => {
     'use strict';
 
     const NAME = 'Zubi.js';
@@ -8,11 +8,14 @@
     // ---- Token ----
     const meta = document.querySelector('meta[name="bridge-token"]');
     let TOKEN = meta?.content;
+    let HOST = location.host;
 
-    if (!TOKEN && location.hash.startsWith('#token=')) {
-        TOKEN = location.hash.slice('#token='.length);
-        sessionStorage.setItem('bridge_token', TOKEN);
-        history.replaceState(null, '', location.pathname + location.search);
+    if(!TOKEN && location.hash){
+        const query = location.hash.split('?')[1] || '';
+        const params = new URLSearchParams(query);
+        TOKEN = params.get('token');
+        const url = new URL(params.get('origin'));
+        HOST = url.host;
     }
 
     if (!TOKEN)
@@ -26,8 +29,8 @@
     sessionStorage.setItem('bridge_token', TOKEN);
 
     // ---- WebSocket ----
-    const wsUrl = window.__BRIDGE_WS_URL__ || `ws://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`;
-
+    const wsUrl = `ws://${HOST}/ws?token=${encodeURIComponent(TOKEN)}`;
+    
     /**
      * Map<"UID Instance", Proxy>> 
      * @type {Map<string, Proxy>} 
@@ -470,7 +473,8 @@
         Navigate(url){
             const u = new URL(url);
             if (u.origin !== location.origin) 
-                u.hash = `token=${TOKEN}`;
+                u.hash = `zubi?${new URLSearchParams({ token: TOKEN, origin: location.origin })}`
+                //u.hash = `token=${TOKEN}`;
             
             location.href = u.toString();
         }
@@ -482,39 +486,3 @@
 
     console.log(`[${NAME}] Ready`);
 })();
-
-/*
-
-(async _ =>{
-    const Plugins = window.Zubi
-    const results = await Plugins.LoadFrom();
-    console.log(results);
-    const FS = await Plugins.NewInstance('FS');
-    console.log(await FS.UID);
-    console.log(await FS.Exists(`C:/Users/Manurov/Documents`))
-    const ticker = await FS.Ticker;
-    // Suscripción (el await es opcional; el handler ya está registrado síncronamente)
-    ticker.AddEventListener("Tick", (e) => {
-        console.log(`Tick #${e.detail.Count} a las ${e.detail.Timestamp}`);
-    });
-
-    // Una sola vez
-    ticker.AddEventListener("Started", (e) => {
-        console.log("Ticker arrancado");
-    }, { once: true });
-
-    // Alias compatible con tu ejemplo
-    await ticker.AddEventListener("Stopped", (e) => {
-        console.log("Ticker detenido");
-    });
-
-    await ticker.Start(500);
-
-    setTimeout(_ => {
-        FS.Dispose();
-        console.log("FS Disposed")
-    }, 5000)
-})();
-
-*/
-
