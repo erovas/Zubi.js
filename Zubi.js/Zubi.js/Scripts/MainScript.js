@@ -1,9 +1,12 @@
 ﻿(_ => {
     'use strict';
 
-    const NAME = 'Zubi.js';
+    const NAME = 'Zubi';
     const UID = '___UID___';
     const PLUGINS = 'Plugins';
+
+    if(window[NAME])
+        return;
 
     // ---- Token ----
     const meta = document.querySelector('meta[name="bridge-token"]');
@@ -480,7 +483,7 @@
         }
     }
 
-    Object.defineProperty(window, NAME.split('.')[0], {
+    Object.defineProperty(window, NAME, {
         get: () => PluginsApi
     });
 

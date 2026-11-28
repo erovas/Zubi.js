@@ -30,7 +30,7 @@ namespace Zubi.js
                 shutdownTcs.TrySetResult(true);
             };
 
-            var server = new FileServer($"{localOrigin}/", srcPath, session, plugins);
+            var server = new FileServer($"{localOrigin}/", srcPath, session);
             var bridge = new WSocket(
                 session,
                 plugins,

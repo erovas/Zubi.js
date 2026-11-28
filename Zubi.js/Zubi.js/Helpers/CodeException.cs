@@ -21,7 +21,7 @@ namespace Zubi.js.Helpers
             while (true)
             {
                 if (ex is CodeException rex) return rex;
-                if (ex is TargetInvocationException { InnerException: not null } tie) { ex = tie.InnerException; continue; }
+                if (ex is TargetInvocationException { InnerException: not null } tie) { ex = tie.InnerException ?? new Exception(); continue; }
                 if (ex is AggregateException { InnerExceptions.Count: > 0 } agg) { ex = agg.InnerExceptions[0]; continue; }
                 break;
             }
@@ -96,7 +96,7 @@ namespace Zubi.js.Helpers
                 return new CodeException("EINVAL", ex.Message);
 
             // 12. Fallback
-            return new CodeException("EINTERNAL", $"{ex.GetType().Name}: {ex.Message}");
+            return new CodeException("EINTERNAL", $"{ex?.GetType().Name}: {ex?.Message}");
         }
 
         // ---------- Mapeos por SO ----------

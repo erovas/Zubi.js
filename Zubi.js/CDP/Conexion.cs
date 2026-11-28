@@ -243,7 +243,10 @@ namespace CDP
                 if (doc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var ws))
                     return ws.GetString();
             }
-            catch { }
+            catch 
+            {
+                throw;
+            }
             return null;
         }
 

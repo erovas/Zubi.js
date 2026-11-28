@@ -26,7 +26,8 @@ namespace CDP
             Input = new Input(_con);
             Browser = new Browser(_con);
 
-            _ = InitializeAsync(new Uri(App.Browser.Href), App.Browser.DebugPort);
+            //_ = InitializeAsync(new Uri(App.Browser.Href), App.Browser.DebugPort);
+            _ = InitializeAsync(new Uri("http://127.0.0.1"), App.Browser.DebugPort);
         }
 
         public async Task InitializeAsync(Uri uri, int debugPort)

@@ -1,5 +1,5 @@
-﻿using System.Net;
-using System.Text;
+﻿using System.Text;
+using Zubi.js.Bridge.Shims;
 using Zubi.js.Helpers;
 using Zubi.js.PluginManager;
 using Zubi.js.Scripts;
@@ -11,19 +11,17 @@ namespace Zubi.js.Bridge
     /// </summary>
     internal sealed class FileServer
     {
-        private readonly HttpListener _listener = new();
+        private readonly TcpHttpListener _listener = new();
         private readonly string _rootPath;
         private readonly SessionStore _session;
-        private readonly Plugins _plugins;
 
         public Func<HttpListenerContext, Task>? WebSocketHandler { get; set; }
 
-        public FileServer(string baseUrl, string rootPath, SessionStore session, Plugins plugins)
+        public FileServer(string baseUrl, string rootPath, SessionStore session)
         {
             _listener.Prefixes.Add(baseUrl);
             _rootPath = Path.GetFullPath(rootPath);
             _session = session;
-            _plugins = plugins;
         }
 
         public void Start()

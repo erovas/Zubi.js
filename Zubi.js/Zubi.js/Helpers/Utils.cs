@@ -1,9 +1,10 @@
-﻿using System.Net;
-using System.Text.Json;
-using System.Reflection;
-using System.Diagnostics;
+﻿using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Zubi.js.Helpers
@@ -77,6 +78,20 @@ namespace Zubi.js.Helpers
 
         public static string GetUrlPort(int port)
         {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up) 
+                    continue;
+
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) 
+                    continue;
+
+                foreach (var addr in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (addr.Address.AddressFamily == AddressFamily.InterNetwork) // IPv4
+                        return $"http://{addr.Address.ToString()}:{port}";
+                }
+            }
             return $"http://127.0.0.1:{port}";
         }
 
